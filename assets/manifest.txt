@@ -15,11 +15,8 @@ sync:test_settings.py->/home/pi/Desktop/test_settings.py
 
 # web ui
 sync:webui/index.php->/var/www/html/index.php
-sync:webui/functions.php->/var/www/html/functions.php
 sync:webui/db_manage_extx.inc->/var/www/html/db_manage_extx.inc
 sync:webui/db_management_build.php->/var/www/html/db_management_build.php
-sync:webui/functions.php->/var/www/html/functions.php
-sync:webui/index.php->/var/www/html/index.php
 sync:webui/kill.sh->/var/www/html/kill.sh
 sync:webui/picker.php->/var/www/html/picker.php
 sync:webui/restart.sh->/var/www/html/restart.sh
