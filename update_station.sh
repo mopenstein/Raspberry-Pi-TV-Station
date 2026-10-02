@@ -28,6 +28,53 @@ if ! curl -s -f -L "$GITHUB_RAW/assets/manifest.txt?cache=$(date +%s)" -o "$TMP_
     exit 1
 fi
 
+# ==============================================================================
+# Dynamic Manifest-Driven Backup
+# ==============================================================================
+BACKUP_DIR="/home/pi/station_backups"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+mkdir -p "$BACKUP_DIR"
+
+echo "Scanning manifest for existing files to back up..."
+
+# Extract unique local destination file paths from the manifest
+BACKUP_ITEMS=()
+while IFS= read -r line || [ -n "$line" ]; do
+    line=$(echo "$line" | tr -d '\r' | xargs)
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+
+    TARGET=""
+    if [[ "$line" =~ ^(sync|update|create): ]]; then
+        PAYLOAD="${line#*:}"
+        TARGET="${PAYLOAD##*->}"
+    elif [[ "$line" =~ ^remove: ]]; then
+        TARGET="${line#remove:}"
+    fi
+
+    # If the target file currently exists on the machine, queue it for backup
+    if [ -n "$TARGET" ] && [ -e "$TARGET" ]; then
+        BACKUP_ITEMS+=("$TARGET")
+    fi
+done < "$TMP_MANIFEST"
+
+# Deduplicate list and create backup archive if matching files exist
+if [ ${#BACKUP_ITEMS[@]} -gt 0 ]; then
+    # Sort and remove duplicate paths
+    readarray -t UNIQUE_BACKUP_ITEMS < <(printf '%s\n' "${BACKUP_ITEMS[@]}" | sort -u)
+
+    echo "Creating safety backup of ${#UNIQUE_BACKUP_ITEMS[@]} existing manifest target(s)..."
+    tar -czf "$BACKUP_DIR/backup_$TIMESTAMP.tar.gz" "${UNIQUE_BACKUP_ITEMS[@]}" 2>/dev/null
+    chown -R pi:pi "$BACKUP_DIR"
+    chmod 600 "$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+    echo "Backup saved: $BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
+
+    # Retention Policy: Keep only the 5 most recent backups
+    ls -1t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f -- 2>/dev/null
+else
+    echo "No matching existing files found to back up."
+fi
+# ==============================================================================
+
 echo "Applying updates..."
 
 # Process the manifest line by line
