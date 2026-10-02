@@ -312,8 +312,8 @@ $current_ip = trim(shell_exec("hostname -I | awk '{print $1}'"));
         <li class="step-item">
             <div class="step-num">2</div>
             <div class="step-info">
-                <span class="step-title">Clock &amp; Timezone</span>
-                <span class="step-desc">Set broadcast region &amp; sync clock</span>
+                <span class="step-title">Region &amp; Video Output</span>
+                <span class="step-desc">Set timezone &amp; CRT composite standard (NTSC/PAL)</span>
             </div>
         </li>
         <li class="step-item">

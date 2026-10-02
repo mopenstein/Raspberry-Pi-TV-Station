@@ -21,16 +21,34 @@ if (!isset($_GET['rebooting'])) {
 }
 
 $error = '';
+$config_file = '/boot/config.txt';
+
+// Detect current timezone
 $current_tz = trim(shell_exec('timedatectl show -p Timezone --value 2>/dev/null'));
 if (empty($current_tz)) {
     $current_tz = trim(shell_exec('cat /etc/timezone 2>/dev/null')) ?: 'UTC';
 }
+
+// Detect current composite video mode (sdtv_mode in config.txt, default is 0: NTSC)
+function get_current_sdtv_mode($path) {
+    if (!file_exists($path)) return '0';
+    $lines = file($path, FILE_IGNORE_NEW_LINES);
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if (preg_match('/^sdtv_mode=(\d+)/i', $trimmed, $m)) {
+            return $m[1];
+        }
+    }
+    return '0';
+}
+$current_mode = get_current_sdtv_mode($config_file);
 
 // Handle Skip Action (No reboot needed)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['skip_step'])) {
     $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
     $state['step'] = 3;
     $state['timezone'] = $current_tz;
+    $state['sdtv_mode'] = $current_mode;
     $state['skipped_step2'] = true;
     $state['updated_at'] = time();
     file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
@@ -40,26 +58,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['skip_step'])) {
 }
 
 // Handle Form Submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_timezone'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_settings'])) {
     $tz = trim($_POST['timezone'] ?? '');
+    $mode = trim($_POST['sdtv_mode'] ?? '0');
     $sync_clock = isset($_POST['sync_clock']);
     $browser_time = trim($_POST['browser_time'] ?? '');
 
+    $valid_modes = ['0', '1', '2', '3'];
     $valid_timezones = DateTimeZone::listIdentifiers();
+
     if (!in_array($tz, $valid_timezones)) {
         $error = 'Please select a valid timezone from the list.';
-    } elseif ($tz === $current_tz && !$sync_clock) {
+    } elseif (!in_array($mode, $valid_modes)) {
+        $error = 'Please select a valid composite video standard.';
+    } elseif ($tz === $current_tz && $mode === $current_mode && !$sync_clock) {
         // Nothing changed, skip reboot
         $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
         $state['step'] = 3;
         $state['timezone'] = $tz;
+        $state['sdtv_mode'] = $mode;
         $state['updated_at'] = time();
         file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
         header('Location: step3.php');
         exit;
     } else {
         // 1. Update system timezone
-        shell_exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz));
+        if ($tz !== $current_tz) {
+            shell_exec('sudo /usr/bin/timedatectl set-timezone ' . escapeshellarg($tz));
+        }
 
         // 2. Sync system clock if requested
         if ($sync_clock && !empty($browser_time) && ctype_digit($browser_time)) {
@@ -67,20 +93,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_timezone'])) {
             shell_exec('sudo /sbin/hwclock -w 2>/dev/null');
         }
 
-        // 3. Advance state machine to Step 3
+        // 3. Update /boot/config.txt with sdtv_mode if changed
+        if ($mode !== $current_mode && file_exists($config_file)) {
+            $content = file_get_contents($config_file);
+            if (preg_match('/^#?\s*sdtv_mode=\d+/m', $content)) {
+                $new_content = preg_replace('/^#?\s*sdtv_mode=\d+/m', 'sdtv_mode=' . $mode, $content);
+            } else {
+                $new_content = rtrim($content) . "\nsdtv_mode=" . $mode . "\n";
+            }
+            file_put_contents('/tmp/config.txt.tmp', $new_content);
+            shell_exec('cat /tmp/config.txt.tmp | sudo tee /boot/config.txt > /dev/null');
+            @unlink('/tmp/config.txt.tmp');
+            shell_exec('sudo /bin/sync');
+        }
+
+        // 4. Advance state machine to Step 3
         $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
         $state['step'] = 3;
         $state['timezone'] = $tz;
+        $state['sdtv_mode'] = $mode;
         $state['updated_at'] = time();
         file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
 
-        // 4. Trigger reboot cycle
+        // 5. Trigger reboot cycle
         header('Location: step2.php?rebooting=1');
         exit;
     }
 }
 
-// Group common zones for easy manual scanning
 $grouped_timezones = [
     'United States & Canada' => [
         'America/New_York' => 'Eastern Time (New York, Toronto, Miami)',
@@ -118,7 +158,7 @@ $all_zones = DateTimeZone::listIdentifiers();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Step 2: Clock & Timezone</title>
+    <title>Step 2: Region & Video Output</title>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -188,22 +228,10 @@ $all_zones = DateTimeZone::listIdentifiers();
             font-size: 0.88rem;
             line-height: 1.45;
         }
-        .match-card strong {
-            color: #86efac;
-        }
-        .notice-icon {
-            font-size: 1.3rem;
-            line-height: 1;
-            flex-shrink: 0;
-        }
-        .notice-text {
-            font-size: 0.88rem;
-            line-height: 1.45;
-            color: #e2c044;
-        }
-        .notice-text strong {
-            color: #ffd84d;
-        }
+        .match-card strong { color: #86efac; }
+        .notice-icon { font-size: 1.3rem; line-height: 1; flex-shrink: 0; }
+        .notice-text { font-size: 0.88rem; line-height: 1.45; color: #e2c044; }
+        .notice-text strong { color: #ffd84d; }
         .error-card {
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.3);
@@ -309,10 +337,7 @@ $all_zones = DateTimeZone::listIdentifiers();
             transition: transform 0.1s ease, background-color 0.15s ease;
             -webkit-tap-highlight-color: transparent;
         }
-        .btn-submit:active {
-            transform: scale(0.98);
-            background: #00bce3;
-        }
+        .btn-submit:active { transform: scale(0.98); background: #00bce3; }
         .btn-skip {
             display: block;
             width: 100%;
@@ -329,15 +354,8 @@ $all_zones = DateTimeZone::listIdentifiers();
             transition: all 0.15s ease;
             -webkit-tap-highlight-color: transparent;
         }
-        .btn-skip:hover {
-            background: #21262d;
-            color: #c9d1d9;
-            border-color: #484f58;
-        }
-        .btn-skip:active {
-            transform: scale(0.98);
-        }
-        /* Highlighted skip button style when timezone already matches */
+        .btn-skip:hover { background: #21262d; color: #c9d1d9; border-color: #484f58; }
+        .btn-skip:active { transform: scale(0.98); }
         .btn-skip-recommended {
             border-color: rgba(34, 197, 94, 0.4);
             color: #4ade80;
@@ -348,7 +366,6 @@ $all_zones = DateTimeZone::listIdentifiers();
             color: #86efac;
             border-color: rgba(34, 197, 94, 0.6);
         }
-
         /* Reboot Helper View Styles */
         .reboot-view { text-align: center; padding: 16px 0; }
         .spinner { margin: 20px auto 28px; width: 52px; height: 52px; border: 4px solid #232a37; border-top: 4px solid #00d4ff; border-radius: 50%; animation: spin 1s linear infinite; }
@@ -369,19 +386,18 @@ $all_zones = DateTimeZone::listIdentifiers();
     <?php render_reboot_screen('step3.php'); ?>
 <?php else: ?>
     <div class="badge">Step 2 of 5</div>
-    <h1>Clock & Timezone</h1>
-    <p class="subtitle">Select your local region to ensure scheduled broadcasts and bumpers air at the right time.</p>
+    <h1>Region &amp; Video Output</h1>
+    <p class="subtitle">Set your broadcast timezone and configure the composite TV standard for your CRT.</p>
 
-    <!-- DYNAMIC MATCH ALERT (Hidden by default, shown via JS if matches) -->
-    <div class="match-card" id="matchCard">
-        ✓ <strong>Timezone Match Detected:</strong> Your browser and the Raspberry Pi are both set to <span id="matchTzLabel"></span>. We recommend skipping this step to bypass a reboot.
+    <!-- TIMEZONE MATCH ALERT -->
+    <div class="match-card" id="matchTzCard">
+        ✓ <strong>Timezone Match:</strong> Both your station and browser are set to <span id="matchTzLabel"></span>.
     </div>
 
-    <!-- STANDARD NOTICE -->
     <div class="notice-card" id="noticeCard">
         <div class="notice-icon">⚡</div>
         <div class="notice-text">
-            <strong>Reboot Notice:</strong> Updating time and system services requires a restart (~30s). Skip if already correct.
+            <strong>Reboot Notice:</strong> Updating clock and composite video timing (<code>sdtv_mode</code>) requires a restart (~30s).
         </div>
     </div>
 
@@ -423,7 +439,7 @@ $all_zones = DateTimeZone::listIdentifiers();
             </optgroup>
         </select>
 
-        <label class="checkbox-container">
+		<label class="checkbox-container">
             <input type="checkbox" name="sync_clock" value="1" checked>
             <div class="checkbox-text">
                 Sync Pi clock to this device's current time
@@ -431,8 +447,23 @@ $all_zones = DateTimeZone::listIdentifiers();
             </div>
         </label>
 
-        <button type="submit" name="save_timezone" value="1" class="btn-submit">Save Time & Restart to Step 3</button>
-        <button type="submit" name="skip_step" value="1" id="btnSkip" class="btn-skip" formnovalidate>Keep Current Time (Skip)</button>
+		<!-- VIDEO STANDARD MATCH ALERT -->
+		<div class="match-card" id="matchVideoCard">
+			✓ <strong>Video Standard Match:</strong> Composite output is already configured for <span id="matchVideoLabel"></span>.
+		</div>
+
+        <label class="input-label" for="sdtvMode">Composite Video Standard (CRT Output)</label>
+        <select id="sdtvMode" name="sdtv_mode">
+            <option value="0" <?= ($current_mode === '0') ? 'selected' : '' ?>>NTSC — North America (480i @ 60Hz)</option>
+            <option value="2" <?= ($current_mode === '2') ? 'selected' : '' ?>>PAL — UK, Europe, Australia (576i @ 50Hz)</option>
+            <option value="1" <?= ($current_mode === '1') ? 'selected' : '' ?>>NTSC-J — Japan (480i @ 60Hz, 0 IRE)</option>
+            <option value="3" <?= ($current_mode === '3') ? 'selected' : '' ?>>PAL-M — Brazil (480i @ 60Hz)</option>
+        </select>
+
+        
+
+        <button type="submit" name="save_settings" value="1" class="btn-submit">Save &amp; Restart to Step 3</button>
+        <button type="submit" name="skip_step" value="1" id="btnSkip" class="btn-skip" formnovalidate>Keep Current Settings (Skip)</button>
     </form>
 
     <?php render_emergency_reset(); ?>
@@ -441,20 +472,88 @@ $all_zones = DateTimeZone::listIdentifiers();
         document.getElementById('browserTime').value = Math.floor(Date.now() / 1000);
 
         const currentPiTz = "<?= addslashes($current_tz) ?>";
+        const currentPiMode = "<?= addslashes($current_mode) ?>"; // '0', '1', '2', or '3'
         const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        const matchCard = document.getElementById('matchCard');
+        
+        const matchTzCard = document.getElementById('matchTzCard');
+        const matchVideoCard = document.getElementById('matchVideoCard');
         const noticeCard = document.getElementById('noticeCard');
         const btnSkip = document.getElementById('btnSkip');
-        const matchLabel = document.getElementById('matchTzLabel');
+        const matchTzLabel = document.getElementById('matchTzLabel');
+        const matchVideoLabel = document.getElementById('matchVideoLabel');
+        const tzDropdown = document.getElementById('timezone');
+        const sdtvDropdown = document.getElementById('sdtvMode');
 
-        // Check if browser timezone matches the Raspberry Pi's current setting
-        if (browserTz && currentPiTz && browserTz.toLowerCase() === currentPiTz.toLowerCase()) {
-            matchLabel.innerText = currentPiTz;
-            matchCard.style.display = 'block';
-            noticeCard.style.display = 'none';
-            btnSkip.classList.add('btn-skip-recommended');
-            btnSkip.innerText = 'Keep ' + currentPiTz + ' (Skip Step)';
+        const modeLabels = {
+            '0': 'NTSC (480i @ 60Hz)',
+            '1': 'NTSC-J (480i @ 60Hz)',
+            '2': 'PAL (576i @ 50Hz)',
+            '3': 'PAL-M (480i @ 60Hz)'
+        };
+
+        // Determine expected standard based on browser region on initial page load
+        if (browserTz) {
+            const isPalRegion = /^(Europe|Australia|Africa|Atlantic|Indian)\//i.test(browserTz) || 
+                                browserTz.startsWith('Pacific/Auckland') || 
+                                browserTz.startsWith('Asia/Hong_Kong') ||
+                                browserTz.startsWith('Asia/Singapore');
+
+            const isJapan = browserTz.startsWith('Asia/Tokyo');
+
+            let suggestedMode = '0';
+            if (isPalRegion) {
+                suggestedMode = '2';
+            } else if (isJapan) {
+                suggestedMode = '1';
+            }
+
+            sdtvDropdown.value = suggestedMode;
         }
+
+        // Live evaluator function
+        function evaluateMatches() {
+            const selectedTz = tzDropdown.value;
+            const selectedMode = sdtvDropdown.value;
+
+            // Check if current selection on screen matches hardware
+            const tzMatches = currentPiTz && (selectedTz.toLowerCase() === currentPiTz.toLowerCase());
+            const videoMatches = (selectedMode === currentPiMode);
+
+            // Update Timezone Match Card
+            if (tzMatches) {
+                matchTzLabel.innerText = currentPiTz;
+                matchTzCard.style.display = 'block';
+            } else {
+                matchTzCard.style.display = 'none';
+            }
+
+            // Update Video Standard Match Card
+            if (videoMatches) {
+                matchVideoLabel.innerText = modeLabels[currentPiMode] || 'Current Setting';
+                matchVideoCard.style.display = 'block';
+            } else {
+                matchVideoCard.style.display = 'none';
+            }
+
+            // If BOTH match hardware, a reboot is unnecessary; show recommended skip
+            if (tzMatches && videoMatches) {
+                noticeCard.style.display = 'none';
+                btnSkip.classList.add('btn-skip-recommended');
+                btnSkip.innerText = 'Keep Current Settings (Skip Step)';
+            } else {
+                // User picked something requiring a restart
+                noticeCard.style.display = 'flex';
+                btnSkip.classList.remove('btn-skip-recommended');
+                btnSkip.innerText = 'Keep Current Settings (Skip)';
+            }
+        }
+
+        // Run once on load
+        evaluateMatches();
+
+        // Listen for live dropdown changes
+        tzDropdown.addEventListener('change', evaluateMatches);
+        sdtvDropdown.addEventListener('change', evaluateMatches);
     </script>
 <?php endif; ?>
 

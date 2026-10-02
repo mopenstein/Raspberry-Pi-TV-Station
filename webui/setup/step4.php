@@ -8,8 +8,9 @@ handle_reboot_logic('step5.php');
 // Gatekeeper check: Ensure user belongs on Step 4
 if (!isset($_GET['rebooting'])) {
     if (file_exists($state_file)) {
-        $state = json_decode(file_get_contents($state_file), true);
-        $active_step = $state['step'] ?? 4;
+        $raw_state = file_get_contents($state_file);
+        $state = !empty($raw_state) ? json_decode($raw_state, true) : array();
+        $active_step = isset($state['step']) ? $state['step'] : 4;
         if ($active_step < 4) {
             header("Location: step{$active_step}.php");
             exit;
@@ -25,63 +26,76 @@ if (!isset($_GET['rebooting'])) {
 
 $error = '';
 
-// Check current network status using wireless extensions
-$current_ssid = trim(shell_exec('iwgetid -r 2>/dev/null'));
-$current_ip = trim(shell_exec("hostname -I | awk '{print $1}'"));
+// Check if a wireless radio (wlan0) is physically present
+$has_wifi = file_exists('/sys/class/net/wlan0');
+
+// Safe command execution helper
+function safe_exec($cmd) {
+    $out = @shell_exec($cmd);
+    return is_string($out) ? trim($out) : '';
+}
+
+// Check current network status
+$current_ssid = $has_wifi ? safe_exec('iwgetid -r 2>/dev/null') : '';
+$current_ip = safe_exec("hostname -I 2>/dev/null | awk '{print $1}'");
 
 // Scan for nearby Wi-Fi networks using iwlist
 function scan_wifi() {
-    $networks = [];
-    $raw = shell_exec('sudo /sbin/iwlist wlan0 scan 2>/dev/null');
+    $networks = array();
+    $raw = @shell_exec('sudo /sbin/iwlist wlan0 scan 2>/dev/null');
 
-    if ($raw) {
-        // Split scan into individual cell blocks
+    if ($raw && is_string($raw)) {
         $cells = explode('Cell ', $raw);
-        array_shift($cells); // drop output before the first Cell
+        array_shift($cells);
 
         foreach ($cells as $cell) {
-            // Extract SSID
             if (preg_match('/ESSID:"([^"]+)"/', $cell, $ssid_match)) {
                 $ssid = trim($ssid_match[1]);
                 if ($ssid === '') continue;
 
-                // Extract signal quality percentage
                 $signal = 50;
                 if (preg_match('/Quality=([0-9]+)\/([0-9]+)/', $cell, $qual_match)) {
-                    $signal = (int) round(($qual_match[1] / $qual_match[2]) * 100);
+                    $denom = (int)$qual_match[2];
+                    if ($denom > 0) {
+                        $signal = (int) round(((int)$qual_match[1] / $denom) * 100);
+                    }
                 }
 
-                // Check for encryption
                 $secured = (preg_match('/Encryption key:on/i', $cell) === 1);
 
                 if (!isset($networks[$ssid]) || $networks[$ssid]['signal'] < $signal) {
-                    $networks[$ssid] = [
+                    $networks[$ssid] = array(
                         'ssid' => $ssid,
                         'signal' => $signal,
                         'secured' => $secured
-                    ];
+                    );
                 }
             }
         }
     }
 
-    // Sort descending by signal strength
-    uasort($networks, function ($a, $b) {
-        return $b['signal'] <=> $a['signal'];
-    });
+    if (!empty($networks)) {
+        uasort($networks, function ($a, $b) {
+            if ($a['signal'] == $b['signal']) {
+                return 0;
+            }
+            return ($a['signal'] > $b['signal']) ? -1 : 1;
+        });
+    }
 
     return $networks;
 }
 
-$wifi_list = scan_wifi();
+$wifi_list = $has_wifi ? scan_wifi() : array();
 
 // Handle Skip Action (Proceed directly to Step 5 without rebooting)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['skip_step'])) {
-    $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
+    $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : array();
+    if (!is_array($state)) $state = array();
     $state['step'] = 5;
     $state['skipped_step4'] = true;
     $state['updated_at'] = time();
-    file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
+    @file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
 
     header('Location: step5.php');
     exit;
@@ -89,9 +103,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['skip_step'])) {
 
 // Handle Wi-Fi Save & Connect via wpa_supplicant
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_wifi'])) {
-    $selected_ssid = trim($_POST['ssid_select'] ?? '');
-    $custom_ssid = trim($_POST['custom_ssid'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $selected_ssid = isset($_POST['ssid_select']) ? trim($_POST['ssid_select']) : '';
+    $custom_ssid = isset($_POST['custom_ssid']) ? trim($_POST['custom_ssid']) : '';
+    $password = isset($_POST['password']) ? $_POST['password'] : '';
 
     $ssid = ($selected_ssid === '__custom__') ? $custom_ssid : $selected_ssid;
 
@@ -99,20 +113,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_wifi'])) {
         $error = 'Please select a network or enter an SSID.';
     } else {
         $conf_path = '/etc/wpa_supplicant/wpa_supplicant.conf';
-        $existing_conf = shell_exec("sudo /bin/cat {$conf_path} 2>/dev/null") ?: '';
+        $existing_conf = safe_exec("sudo /bin/cat {$conf_path} 2>/dev/null");
 
-        // Guarantee essential configuration headers exist
         $required_header = "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\ncountry=US\n";
         
         if (empty($existing_conf) || strpos($existing_conf, 'ctrl_interface') === false) {
             $base_content = $required_header;
         } else {
-            // Strip any prior block matching this exact SSID to avoid duplication
             $pattern = '/network\s*=\s*\{[^}]*ssid="' . preg_quote($ssid, '/') . '"[^}]*\}\n?/s';
             $base_content = preg_replace($pattern, '', $existing_conf);
         }
 
-        // Build target network block
         if ($password !== '') {
             $network_block = "\nnetwork={\n    ssid=\"" . addslashes($ssid) . "\"\n    psk=\"" . addslashes($password) . "\"\n    key_mgmt=WPA-PSK\n}\n";
         } else {
@@ -121,24 +132,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_wifi'])) {
 
         $final_conf = trim($base_content) . "\n" . $network_block;
 
-        // Stage file in /tmp and copy into place with strict permissions
-        file_put_contents('/tmp/wpa_supplicant.conf.tmp', $final_conf);
-        shell_exec('sudo /bin/cp /tmp/wpa_supplicant.conf.tmp /etc/wpa_supplicant/wpa_supplicant.conf');
-        shell_exec('sudo /bin/chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf');
-        shell_exec('sudo /bin/chown root:root /etc/wpa_supplicant/wpa_supplicant.conf');
+        @file_put_contents('/tmp/wpa_supplicant.conf.tmp', $final_conf);
+        safe_exec('sudo /bin/cp /tmp/wpa_supplicant.conf.tmp /etc/wpa_supplicant/wpa_supplicant.conf');
+        safe_exec('sudo /bin/chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf');
+        safe_exec('sudo /bin/chown root:root /etc/wpa_supplicant/wpa_supplicant.conf');
         @unlink('/tmp/wpa_supplicant.conf.tmp');
 
-        // Reload daemon configuration
-        shell_exec('sudo /sbin/wpa_cli -i wlan0 reconfigure 2>/dev/null');
+        safe_exec('sudo /sbin/wpa_cli -i wlan0 reconfigure 2>/dev/null');
 
-        // Advance state machine to Step 5
-        $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
+        $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : array();
+        if (!is_array($state)) $state = array();
         $state['step'] = 5;
         $state['wifi_ssid'] = $ssid;
         $state['updated_at'] = time();
-        file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
+        @file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
 
-        // Trigger reboot cycle to Step 5
         header('Location: step4.php?rebooting=1');
         exit;
     }
@@ -408,91 +416,112 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_wifi'])) {
         </div>
     </div>
 
-    <div class="notice-card">
-        <div class="notice-icon">⚡</div>
-        <div class="notice-text">
-            <strong>Reboot Notice:</strong> Connecting to Wi-Fi reboots the Pi (~30s) to bind services to the wireless address.
-        </div>
-    </div>
-
-    <?php if (!empty($error)): ?>
-        <div class="error-card"><?= htmlspecialchars($error) ?></div>
-    <?php endif; ?>
-
-    <form method="POST">
-        <label class="input-label" for="ssidSelect">Select Wi-Fi Network</label>
-        <select id="ssidSelect" name="ssid_select" onchange="toggleCustomSsid(this)">
-            <?php if (!empty($wifi_list)): ?>
-                <?php foreach ($wifi_list as $net): ?>
-                    <option value="<?= htmlspecialchars($net['ssid']) ?>">
-                        <?= htmlspecialchars($net['ssid']) ?> (<?= $net['signal'] ?>%<?= $net['secured'] ? ' 🔒' : '' ?>)
-                    </option>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <option value="">-- No Networks Detected --</option>
-            <?php endif; ?>
-            <option value="__custom__">+ Enter Hidden / Other SSID</option>
-        </select>
-
-        <div id="customSsidGroup" class="custom-ssid-field">
-            <label class="input-label" for="customSsid">Network SSID Name</label>
-            <input type="text" id="customSsid" name="custom_ssid" placeholder="Enter network name" autocomplete="off">
+    <?php if (!$has_wifi): ?>
+        <!-- NO WIRELESS ADAPTER DETECTED -->
+        <div class="notice-card" style="border-color: rgba(234, 179, 8, 0.4); background: rgba(234, 179, 8, 0.08);">
+            <div class="notice-icon" style="font-size: 1.4rem;">⚠️</div>
+            <div class="notice-text">
+                <strong style="color: #ffd84d; font-size: 0.95rem;">No Wi-Fi Interface Detected</strong><br>
+                This hardware does not have onboard Wi-Fi. The station will operate via its active wired Ethernet connection.
+                <div style="margin-top: 8px; font-size: 0.8rem; color: #8b949e;">
+                    If using a USB Wi-Fi adapter, plug it in and refresh this page.
+                </div>
+            </div>
         </div>
 
-        <label class="input-label" for="wifiPass">Wi-Fi Password</label>
-        <div class="password-wrapper">
-            <input 
-                type="password" 
-                id="wifiPass" 
-                name="password" 
-                placeholder="Leave empty for open networks" 
-                autocomplete="current-password"
-                autocorrect="off"
-                autocapitalize="none"
-                spellcheck="false"
-            >
-            <button type="button" class="toggle-password" id="togglePassBtn" aria-label="Toggle password visibility">
-                <svg id="eyeOpen" viewBox="0 0 24 24">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-                <svg id="eyeClosed" viewBox="0 0 24 24" style="display: none;">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                </svg>
+        <form method="POST" style="margin-top: 24px;">
+            <button type="submit" name="skip_step" value="1" class="btn-submit" style="background: #22c55e; color: #050b14; box-shadow: 0 4px 18px rgba(34, 197, 94, 0.3);">
+                Continue using Wired Network &rarr;
             </button>
+        </form>
+    <?php else: ?>
+        <div class="notice-card">
+            <div class="notice-icon">⚡</div>
+            <div class="notice-text">
+                <strong>Reboot Notice:</strong> Connecting to Wi-Fi reboots the Pi (~30s) to bind services to the wireless address.
+            </div>
         </div>
 
-        <button type="submit" name="save_wifi" value="1" class="btn-submit">Connect &amp; Restart to Step 5</button>
-        <button type="submit" name="skip_step" value="1" class="btn-skip" formnovalidate>Keep Current Network (Skip)</button>
-    </form>
+        <?php if (!empty($error)): ?>
+            <div class="error-card"><?= htmlspecialchars($error) ?></div>
+        <?php endif; ?>
+
+        <form method="POST">
+            <label class="input-label" for="ssidSelect">Select Wi-Fi Network</label>
+            <select id="ssidSelect" name="ssid_select" onchange="toggleCustomSsid(this)">
+                <?php if (!empty($wifi_list)): ?>
+                    <?php foreach ($wifi_list as $net): ?>
+                        <option value="<?= htmlspecialchars($net['ssid']) ?>">
+                            <?= htmlspecialchars($net['ssid']) ?> (<?= $net['signal'] ?>%<?= $net['secured'] ? ' 🔒' : '' ?>)
+                        </option>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <option value="">-- No Networks Detected --</option>
+                <?php endif; ?>
+                <option value="__custom__">+ Enter Hidden / Other SSID</option>
+            </select>
+
+            <div id="customSsidGroup" class="custom-ssid-field">
+                <label class="input-label" for="customSsid">Network SSID Name</label>
+                <input type="text" id="customSsid" name="custom_ssid" placeholder="Enter network name" autocomplete="off">
+            </div>
+
+            <label class="input-label" for="wifiPass">Wi-Fi Password</label>
+            <div class="password-wrapper">
+                <input 
+                    type="password" 
+                    id="wifiPass" 
+                    name="password" 
+                    placeholder="Leave empty for open networks" 
+                    autocomplete="current-password"
+                    autocorrect="off"
+                    autocapitalize="none"
+                    spellcheck="false"
+                >
+                <button type="button" class="toggle-password" id="togglePassBtn" aria-label="Toggle password visibility">
+                    <svg id="eyeOpen" viewBox="0 0 24 24">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <svg id="eyeClosed" viewBox="0 0 24 24" style="display: none;">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <button type="submit" name="save_wifi" value="1" class="btn-submit">Connect &amp; Restart to Step 5</button>
+            <button type="submit" name="skip_step" value="1" class="btn-skip" formnovalidate>Keep Current Network (Skip)</button>
+        </form>
+
+        <script>
+            function toggleCustomSsid(el) {
+                const customGroup = document.getElementById('customSsidGroup');
+                const customInput = document.getElementById('customSsid');
+                if (el.value === '__custom__') {
+                    customGroup.style.display = 'block';
+                    customInput.focus();
+                } else {
+                    customGroup.style.display = 'none';
+                }
+            }
+
+            const passInput = document.getElementById('wifiPass');
+            const toggleBtn = document.getElementById('togglePassBtn');
+            const eyeOpen = document.getElementById('eyeOpen');
+            const eyeClosed = document.getElementById('eyeClosed');
+
+            toggleBtn.addEventListener('click', () => {
+                const isPassword = passInput.getAttribute('type') === 'password';
+                passInput.setAttribute('type', isPassword ? 'text' : 'password');
+                eyeOpen.style.display = isPassword ? 'none' : 'block';
+                eyeClosed.style.display = isPassword ? 'block' : 'none';
+            });
+        </script>
+    <?php endif; ?>
 
     <?php render_emergency_reset(); ?>
 
-    <script>
-        function toggleCustomSsid(el) {
-            const customGroup = document.getElementById('customSsidGroup');
-            const customInput = document.getElementById('customSsid');
-            if (el.value === '__custom__') {
-                customGroup.style.display = 'block';
-                customInput.focus();
-            } else {
-                customGroup.style.display = 'none';
-            }
-        }
-
-        const passInput = document.getElementById('wifiPass');
-        const toggleBtn = document.getElementById('togglePassBtn');
-        const eyeOpen = document.getElementById('eyeOpen');
-        const eyeClosed = document.getElementById('eyeClosed');
-
-        toggleBtn.addEventListener('click', () => {
-            const isPassword = passInput.getAttribute('type') === 'password';
-            passInput.setAttribute('type', isPassword ? 'text' : 'password');
-            eyeOpen.style.display = isPassword ? 'none' : 'block';
-            eyeClosed.style.display = isPassword ? 'block' : 'none';
-        });
-    </script>
 <?php endif; ?>
 
 </div>
