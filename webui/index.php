@@ -1,4 +1,14 @@
 <?php
+
+
+error_reporting(E_ALL);
+ini_set("display_errors", 1);
+
+require_once("settings.class.inc");
+require_once("db_manage_extx.inc");
+require_once("functions.php");
+
+
 $setup_state_file = __DIR__ . '/setup/state.json';
 
 // If setup has never run, or is incomplete, redirect to the wizard
@@ -15,13 +25,6 @@ if (file_exists($setup_state_file)) {
     header('Location: /setup/');
     exit;
 }
-
-error_reporting(E_ALL);
-ini_set("display_errors", 1);
-
-require_once("settings.class.inc");
-require_once("db_manage_extx.inc");
-require_once("functions.php");
 
 /**
  * Generates the HTML select dropdown for channels based on settings
