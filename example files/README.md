@@ -15,7 +15,7 @@ Videos must be tagged in the filename with their total length in seconds (rounde
 * **Example (Ad):** `Gillette_1955_%T(30)%_NA_.mp4` (30 seconds)
 
 ### Automation
-These preparation steps (normalization and tagging) can be automated using the C# utility [VideoSplit](https://github.com/mopenstein/VideoSplit).
+These preparation steps (normalization and tagging) can be automated using the C# utility [TV-Station-Assistant](https://github.com/mopenstein/TV-Station-Assistant).
 
 ---
 
