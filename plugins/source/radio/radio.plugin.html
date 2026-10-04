@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radio Station Plugin Documentation</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 2em;
+            background-color: #12151a;
+            color: #d8dee9;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background-color: #1c2026;
+            padding: 2.5em;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            border: 1px solid #2e3440;
+        }
+        h1, h2, h3 {
+            color: #eceff4;
+            border-bottom: 2px solid #2e3440;
+            padding-bottom: 0.3em;
+            margin-top: 1.5em;
+        }
+        h1 { font-size: 2.2em; }
+        h2 { font-size: 1.6em; }
+        h3 { font-size: 1.25em; }
+        p { margin-bottom: 1em; }
+        code {
+            background-color: #15181e;
+            padding: 0.15em 0.4em;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: #e5c07b;
+            border: 1px solid #252b33;
+        }
+        pre {
+            background-color: #15181e;
+            color: #abb2bf;
+            padding: 1.2em;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #252b33;
+        }
+        strong {
+            color: #eceff4;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5em;
+            margin-bottom: 1.5em;
+        }
+        th, td {
+            padding: 0.85em;
+            text-align: left;
+            border-bottom: 1px solid #2e3440;
+            vertical-align: top;
+        }
+        th {
+            background-color: #252b33;
+            font-weight: bold;
+            color: #eceff4;
+        }
+        tr:nth-child(even) {
+            background-color: #171b21;
+        }
+        .note {
+            background-color: #1a2330;
+            padding: 1.1em;
+            border-left: 4px solid #5294e2;
+            margin: 1.2em 0;
+            border-radius: 4px;
+            color: #cfd8dc;
+        }
+        .alert {
+            background-color: #2a2318;
+            padding: 1.1em;
+            border-left: 4px solid #d19a66;
+            margin: 1.2em 0;
+            border-radius: 4px;
+            color: #e5c07b;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #2e3440;
+            margin: 2em 0;
+        }
+        ul {
+            padding-left: 1.4em;
+        }
+        li {
+            margin-bottom: 0.4em;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <h1>Radio Station Plugin Documentation</h1>
+
+    <p><strong>Plugin File:</strong> <code>radio.py</code></p>
+    <p><strong>Keywords / Types:</strong> <code>audio</code>, <code>radio</code></p>
+    <p><strong>Supported Plugin Version:</strong> <code>0.1</code> (2026.02.09)</p>
+    <p><strong>Supported Audio Extensions:</strong> <code>mp3</code>, <code>m4a</code>, <code>aac</code>, <code>wav</code>, <code>flac</code>, <code>ogg</code>, <code>wma</code></p>
+    <p><strong>Purpose:</strong> Implements audio-centric broadcasting pipelines. Supports playing standalone random audio tracks or assembling structured, sequenced radio program blocks with background music beds, rotation rules, weighted path selection, and episode sequencing.</p>
+
+    <div class="note">
+        <strong>Hardware Playback Architecture</strong><br>
+        Audio output is driven via OMXPlayer using the globally configured <code>player_settings</code>. When background music beds (<code>bed</code>) are specified, the plugin spawns an asynchronous, non-blocking background OMXPlayer instance synchronized to stop automatically when the main foreground audio track finishes.
+    </div>
+
+    <hr>
+
+    <h2>1. Keyword Handlers</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Keyword</th>
+                <th>Target Scope</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>audio</code></td>
+                <td>Folder pool</td>
+                <td>Selects a random folder from the rule's directory pool and plays a single random audio file from that folder.</td>
+            </tr>
+            <tr>
+                <td><code>radio</code></td>
+                <td>Structured format block</td>
+                <td>Executes a multi-element radio program sequence defined by the <code>format</code> array. Evaluates each segment in order with support for weighted rotation, background audio beds, loop counts, and tracking.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>2. Top-Level Schedule Block Attributes</h2>
+    <p>Radio entries are defined directly in the <code>times</code> array of <code>settings.json</code>[cite: 4, 5].</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>name</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>Base directory paths for the block (supports macros like <code>%D[1]%</code>)[cite: 4, 5]. Used as the default root for relative paths in the format definition.</td>
+            </tr>
+            <tr>
+                <td><code>type</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Must be set to either <code>"audio"</code> or <code>"radio"</code> to trigger this plugin.</td>
+            </tr>
+            <tr>
+                <td><code>format</code></td>
+                <td><code>[&lt;element&gt;] | [[&lt;element&gt;]]</code></td>
+                <td><em>Required for <code>type: "radio"</code></em>. An array of format steps, or a nested array of format variations (if nested, one variation array is chosen at random upon execution).</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>3. Format Segment Definition (<code>format</code> Array)</h2>
+    <p>Each entry in a <code>format</code> sequence can be a simple string (interpreted as a relative folder path using random selection) or a configuration object with fine-grained control:</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>path</code></td>
+                <td><code>&lt;string&gt; | [&lt;string&gt;] | [&lt;object&gt;]</code></td>
+                <td><em>Required</em></td>
+                <td>
+                    Directory or list of candidate directories containing audio assets.
+                    <ul>
+                        <li>Relative to the block's base folder.</li>
+                        <li>Absolute path if prefixed with <code>@</code> (e.g., <code>"@%D[1]%/audio/bumpers"</code>).</li>
+                        <li>Supports path objects containing conditional <code>special</code> or <code>chance</code> gates.</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><code>type</code></td>
+                <td>&lt;string&gt;</td>
+                <td><code>"random"</code></td>
+                <td>
+                    Selection algorithm for this segment:
+                    <ul>
+                        <li><code>random</code>: Selects a random audio file from the resolved directory.</li>
+                        <li><code>commercial</code>: Random selection, but logs playback type as <code>commercial</code>.</li>
+                        <li><code>balanced</code>: Queries the backend to select the least-played file in the folder.</li>
+                        <li><code>ordered</code>: Selects the next sequential file using backend tracking.</li>
+                        <li><code>ordered-show</code>: Randomly picks an episode folder under grandparent directory, then plays the next sequential track.</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><code>bed</code></td>
+                <td><code>&lt;string&gt; | [&lt;string&gt;] | [&lt;object&gt;]</code></td>
+                <td><code>null</code></td>
+                <td>Directory containing background audio tracks (music beds). A random bed track is spawned in a non-blocking background player and runs concurrently with the primary track, cutting off automatically when the primary track ends.</td>
+            </tr>
+            <tr>
+                <td><code>loop</code></td>
+                <td>&lt;integer&gt;</td>
+                <td><code>1</code></td>
+                <td>Number of consecutive times this format step repeats before advancing to the next segment in the array.</td>
+            </tr>
+            <tr>
+                <td><code>cut</code></td>
+                <td>&lt;integer&gt; | &lt;float&gt;</td>
+                <td><code>3</code></td>
+                <td>Seconds before the absolute end of the file at which playback is stopped early to allow smooth transitions.</td>
+            </tr>
+            <tr>
+                <td><code>weight</code></td>
+                <td><code>[&lt;number&gt;]</code></td>
+                <td><code>null</code></td>
+                <td>Probability weights matching the <code>path</code> array when multiple paths are provided. Uses weighted random choice to select a directory.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>4. Conditional Path Structures</h2>
+    <p>Instead of static folder strings, both <code>path</code> and <code>bed</code> accept an array of condition objects. The plugin evaluates each object in order until one satisfies all criteria:</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>name</code></td>
+                <td><code>&lt;string&gt; | [&lt;string&gt;]</code></td>
+                <td>The target path or folder list returned if conditions pass.</td>
+            </tr>
+            <tr>
+                <td><code>special</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Holiday or calendar condition (e.g., <code>"halloween"</code>, <code>"xmas"</code>)[cite: 4, 5]. Checked against <code>is_special_time()</code>.</td>
+            </tr>
+            <tr>
+                <td><code>chance</code></td>
+                <td><code>&lt;string&gt; | &lt;float&gt;</code></td>
+                <td>Evaluated mathematical equation or probability threshold between <code>0.0</code> and <code>1.0</code>[cite: 4, 5].</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>5. Configuration Examples</h2>
+
+    <h3>5.1 Simple Random Audio Block (<code>type: "audio"</code>)</h3>
+    <p>Picks a random folder from the list and plays a single random track from it:</p>
+    <pre><code>{
+    "name": [
+        "%D[1]%/music/rock",
+        "%D[1]%/music/pop"
+    ],
+    "type": "audio"
+}</code></pre>
+
+    <h3>5.2 Standard Radio Show Clock with Music Beds (<code>type: "radio"</code>)</h3>
+    <p>Executes an hourly station clock: station ID, news bulletin over a background music bed, sequential story episode, two commercial spots, and a music track:</p>
+    <pre><code>{
+    "name": ["%D[1]%/radio_station"],
+    "type": "radio",
+    "format": [
+        {
+            "path": "station_ids",
+            "type": "random",
+            "cut": 0
+        },
+        {
+            "path": "news_reports",
+            "type": "ordered",
+            "bed": "music_beds/news_theme",
+            "cut": 2
+        },
+        {
+            "path": "dramas",
+            "type": "ordered-show",
+            "cut": 3
+        },
+        {
+            "path": ["ads/local", "ads/national"],
+            "weight": [70, 30],
+            "type": "commercial",
+            "loop": 2,
+            "cut": 1
+        },
+        {
+            "path": "music/classic_hits",
+            "type": "balanced",
+            "cut": 2
+        }
+    ]
+}</code></pre>
+
+    <h3>5.3 Conditional Seasonal Paths</h3>
+    <p>Switches station liners and music beds based on holiday flags or evaluated probability gates:</p>
+    <pre><code>{
+    "name": ["%D[1]%/radio_station"],
+    "type": "radio",
+    "format": [
+        {
+            "path": [
+                { "name": "seasonal/halloween_ids", "special": "halloween" },
+                { "name": "seasonal/xmas_ids", "special": "xmas" },
+                { "name": "bumpers/rare", "chance": "0.10" },
+                { "name": "bumpers/general" }
+            ],
+            "type": "random"
+        },
+        {
+            "path": "music/rotation",
+            "type": "balanced"
+        }
+    ]
+}</code></pre>
+
+</div>
+
+<center><small><i>Generated on Oct. 04, 2026</i></small></center>
+</body>
+</html>
