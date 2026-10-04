@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Programming Configuration Documentation</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 2em;
+            background-color: #12151a;
+            color: #d8dee9;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background-color: #1c2026;
+            padding: 2.5em;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            border: 1px solid #2e3440;
+        }
+        h1, h2, h3 {
+            color: #eceff4;
+            border-bottom: 2px solid #2e3440;
+            padding-bottom: 0.3em;
+            margin-top: 1.5em;
+        }
+        h1 { font-size: 2.2em; }
+        h2 { font-size: 1.6em; }
+        h3 { font-size: 1.25em; }
+        p { margin-bottom: 1em; }
+        code {
+            background-color: #15181e;
+            padding: 0.15em 0.4em;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: #e5c07b;
+            border: 1px solid #252b33;
+        }
+        pre {
+            background-color: #15181e;
+            color: #abb2bf;
+            padding: 1.2em;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #252b33;
+        }
+        strong {
+            color: #eceff4;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5em;
+            margin-bottom: 1.5em;
+        }
+        th, td {
+            padding: 0.85em;
+            text-align: left;
+            border-bottom: 1px solid #2e3440;
+            vertical-align: top;
+        }
+        th {
+            background-color: #252b33;
+            font-weight: bold;
+            color: #eceff4;
+        }
+        tr:nth-child(even) {
+            background-color: #171b21;
+        }
+        .note {
+            background-color: #1a2330;
+            padding: 1.1em;
+            border-left: 4px solid #5294e2;
+            margin: 1.2em 0;
+            border-radius: 4px;
+            color: #cfd8dc;
+        }
+        .alert {
+            background-color: #2a2318;
+            padding: 1.1em;
+            border-left: 4px solid #d19a66;
+            margin: 1.2em 0;
+            border-radius: 4px;
+            color: #e5c07b;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #2e3440;
+            margin: 2em 0;
+        }
+        ul {
+            padding-left: 1.4em;
+        }
+        li {
+            margin-bottom: 0.4em;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <h1>Programming Configuration Documentation</h1>
+
+    <p><strong>File Path:</strong> <code>settings.json</code></p>
+    <p><strong>Supported Settings Version:</strong> <code>0.996</code> (Script v102.3)</p>
+    <p><strong>Purpose:</strong> Defines the programming and operational rules for the automated broadcast system, controlling media selection, scheduling windows, commercial breaks, bumpers, and maintenance tasks.</p>
+
+    <div class="alert">
+        <strong>CRITICAL: Schedule Evaluation Order</strong><br>
+        The script iterates through both <code>times</code> and <code>commercial_times</code> in <strong>REVERSED order (bottom to top)</strong>. Rules placed near the bottom of an array evaluate first and take precedence over rules defined earlier in the list.
+    </div>
+
+    <hr>
+
+    <h2>1. Top-Level Configuration</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>version</code></td>
+                <td>&lt;float&gt; | &lt;string&gt;</td>
+                <td>Version of the configuration file (must match supported engine version, e.g., <code>0.996</code>).</td>
+            </tr>
+            <tr>
+                <td><code>name</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Station display name used for logging and web UI headers.</td>
+            </tr>
+            <tr>
+                <td><code>drive</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>List of root directory mount paths. Automatically substituted via the <code>%D[index]%</code> macro (1-based index: <code>%D[1]%</code>, <code>%D[2]%</code>, etc.).</td>
+            </tr>
+            <tr>
+                <td><code>insert_commercials</code></td>
+                <td>&lt;boolean&gt;</td>
+                <td>Global switch to enable or disable inserting commercial breaks and bumper packages.</td>
+            </tr>
+            <tr>
+                <td><code>commercials_per_break</code></td>
+                <td><code>&lt;string&gt; | &lt;integer&gt;</code></td>
+                <td>Set to <code>"auto"</code> to automatically calculate break durations to reach the next top/half hour, or an integer to force a fixed count of ads per break.</td>
+            </tr>
+            <tr>
+                <td><code>commercials_fill_time_multiplier</code></td>
+                <td>&lt;number&gt;</td>
+                <td>Multiplier controlling the timeout window when dynamically assembling random ads to fill break intervals (defaults to <code>50</code>).</td>
+            </tr>
+            <tr>
+                <td><code>commercials_offset_time</code></td>
+                <td>&lt;integer&gt;</td>
+                <td>Seconds added to or subtracted from the calculated fill duration to adjust program boundary alignment.</td>
+            </tr>
+            <tr>
+                <td><code>max_play_attempts</code></td>
+                <td>&lt;integer&gt;</td>
+                <td>Maximum consecutive playback retry attempts for a source video before failing (defaults to <code>1</code>).</td>
+            </tr>
+            <tr>
+                <td><code>random video on first play</code></td>
+                <td>&lt;boolean&gt;</td>
+                <td>Default behavior for <code>ordered-show</code>: if <code>true</code>, picks a random starting episode on its very first run before proceeding sequentially.</td>
+            </tr>
+            <tr>
+                <td><code>daily reboot</code></td>
+                <td>&lt;boolean&gt;</td>
+                <td>If <code>true</code>, reboots the Raspberry Pi system via sudo between 2:00 AM and 4:00 AM once uptime exceeds ~5.7 hours (20,801 seconds).</td>
+            </tr>
+            <tr>
+                <td><code>debug</code></td>
+                <td>&lt;boolean&gt;</td>
+                <td>Enables verbose console logging and truncates playback durations for rapid schedule testing.</td>
+            </tr>
+            <tr>
+                <td><code>debug positon</code></td>
+                <td>&lt;integer&gt;</td>
+                <td>Max seconds a video or ad plays before automatically skipping ahead while <code>debug</code> mode is active.</td>
+            </tr>
+            <tr>
+                <td><code>time_test</code></td>
+                <td><code>&lt;string&gt; | &lt;null&gt;</code></td>
+                <td>Overrides the system wall clock with an arbitrary testing timestamp (e.g., <code>"Jul 05 2026 12:30AM"</code>). Set to <code>null</code> for live operations.</td>
+            </tr>
+            <tr>
+                <td><code>report_data</code></td>
+                <td>&lt;boolean&gt;</td>
+                <td>Enables logging errors, playbacks, and status heartbeats back to the local web server endpoint.</td>
+            </tr>
+            <tr>
+                <td><code>player_settings</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>Command-line flags passed directly to OMXPlayer instances (e.g., <code>["--no-osd", "--blank"]</code>).</td>
+            </tr>
+            <tr>
+                <td><code>cache_path</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Directory used to store disk scan directory caches (<code>*.cache</code>).</td>
+            </tr>
+            <tr>
+                <td><code>plugins directory</code></td>
+                <td><code>&lt;string&gt; | &lt;null&gt;</code></td>
+                <td>Path to external Python plugin scripts extending custom video types and keyword handlers.</td>
+            </tr>
+            <tr>
+                <td><code>workers</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>Array of local PHP maintenance scripts triggered over HTTP on station boot (e.g., database cleanups).</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>2. Global Objects</h2>
+
+    <h3>2.1 <code>channels</code> Object</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>file</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Path to the local channel indicator file monitored for dynamic channel switching.</td>
+            </tr>
+            <tr>
+                <td><code>names</code></td>
+                <td><code>[&lt;string&gt; | &lt;null&gt;]</code></td>
+                <td>List of available channel identifiers.</td>
+            </tr>
+            <tr>
+                <td><code>error</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Fallback channel switched to when schedules return empty or source files are missing.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3>2.2 <code>vars</code> Object</h3>
+    <p>Defines reusable variable blocks referenced via <code>"$ref/path/key"</code>. Referenced values must be defined prior to being called.</p>
+
+    <hr>
+
+    <h2>3. Programming Rules (<code>times</code> Array)</h2>
+    <p>Evaluated <strong>bottom-to-top</strong>. The first rule matching all criteria executes.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>name</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>Array of target directories or video files. Supports macros like <code>%D[n]%</code>, <code>%day_of_week%</code>, and <code>%month%</code>.</td>
+            </tr>
+            <tr>
+                <td><code>type</code></td>
+                <td>&lt;string&gt;</td>
+                <td>
+                    Playback resolution engine:
+                    <ul>
+                        <li><code>video</code>: Random file from the targeted directories.</li>
+                        <li><code>video-show</code>: Standard random video file selection.</li>
+                        <li><code>balanced-video</code>: Queries local server database to return least-played file across paths.</li>
+                        <li><code>ordered-show</code>: Randomly picks a show subfolder, then plays sequential episodes via server tracking.</li>
+                        <li><code>ordered-video</code>: Selects the next sequential file from targeted folder via server tracking.</li>
+                        <li><code>commercial</code>: Plays a video flagged as a commercial.</li>
+                        <li><em>Plugin-defined</em>: Handled by external plugin handlers.</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><code>channel</code></td>
+                <td><code>&lt;string&gt; | &lt;null&gt;</code></td>
+                <td>Restricts rule execution to a matching active channel (wildcards: <code>"all"</code>, <code>"any"</code>, <code>"*"</code>).</td>
+            </tr>
+            <tr>
+                <td><code>set-tag</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Sets common tag that can be used as a reference for commercials (e.g., <code>kids and family</code>). Overridden if the filename contains an explicit <code>@tag@</code>.</td>
+            </tr>
+            <tr>
+                <td><code>between</code></td>
+                <td>&lt;object&gt;</td>
+                <td>
+                    Compound conditions. Must satisfy all nested groups:
+                    <ul>
+                        <li><code>dates</code>: Array of single dates (<code>"Oct 31"</code>) or date ranges (<code>[["Jun 10", "Aug 31"]]</code>) (OR logic across entries).</li>
+                        <li><code>times</code>: Array of time windows (<code>[["08:00PM", "10:35PM"]]</code>). Supports nested lists for AND conditions.</li>
+                        <li><code>years</code>: Array of allowed years (e.g., <code>[2026]</code>).</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><code>start</code> / <code>end</code></td>
+                <td><code>[HH, MM]</code></td>
+                <td>Alternate 24-hour time range format (e.g., <code>[20, 0]</code> to <code>[22, 30]</code>). Accepts wildcard strings (<code>"*"</code>).</td>
+            </tr>
+            <tr>
+                <td><code>dayOfWeek</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>Allowed days in lowercase (e.g., <code>["saturday", "sunday"]</code>, or <code>["*"]</code>).</td>
+            </tr>
+            <tr>
+                <td><code>month</code></td>
+                <td><code>[&lt;integer&gt;]</code></td>
+                <td>Allowed calendar months (1–12, or <code>["*"]</code>).</td>
+            </tr>
+            <tr>
+                <td><code>date</code></td>
+                <td><code>[&lt;integer&gt;]</code></td>
+                <td>Allowed days of the month (1–31, or <code>["*"]</code>).</td>
+            </tr>
+            <tr>
+                <td><code>special</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Matches calendar holidays with optional day offsets (e.g., <code>"thanksgiving"</code>, <code>"xmas"</code>, <code>"easter-5"</code>).</td>
+            </tr>
+            <tr>
+                <td><code>chance</code></td>
+                <td><code>&lt;string&gt; | &lt;float&gt;</code></td>
+                <td>Mathematical probability expression evaluated between <code>0.0</code> and <code>1.0</code>, or percentage (e.g., <code>"25%"</code>).</td>
+            </tr>
+            <tr>
+                <td><code>minimum-before-repeat</code></td>
+                <td><code>&lt;number&gt; | [&lt;min&gt;, &lt;max&gt;]</code></td>
+                <td>Enforces a cooldown period (in seconds) before this rule or plugin asset can be selected again.</td>
+            </tr>
+            <tr>
+                <td><code>static</code></td>
+                <td><code>[true, &lt;seconds&gt;, &lt;channel_name&gt;]</code></td>
+                <td>Locks the station to this specific schedule block and channel for the specified duration.</td>
+            </tr>
+            <tr>
+                <td><code>prefer-folder</code></td>
+                <td>&lt;string&gt; | &lt;boolean&gt;</td>
+                <td>If active, randomly selects a folder before picking a video, rather than pooling all files together.</td>
+            </tr>
+            <tr>
+                <td><code>weighted</code></td>
+                <td><code>[&lt;number&gt;] | "auto"</code></td>
+                <td>Weights folder probability when <code>prefer-folder</code> is active. Set to <code>"auto"</code> to weight by file count.</td>
+            </tr>
+            <tr>
+                <td><code>min-length</code> / <code>max-length</code></td>
+                <td>&lt;integer&gt;</td>
+                <td>Duration filters in seconds applied against <code>%T(duration)%</code> tags embedded in filenames.</td>
+            </tr>
+            <tr>
+                <td><code>random video on first play</code></td>
+                <td>&lt;boolean&gt;</td>
+                <td>Overrides global setting for <code>ordered-show</code> rules.</td>
+            </tr>
+            <tr>
+                <td><code>bumpers</code></td>
+                <td>&lt;object&gt;</td>
+                <td>
+                    Bumper configurations:
+                    <ul>
+                        <li><code>in</code>: Folders containing bumpers played coming out of commercial breaks.</li>
+                        <li><code>out</code>: Folders containing bumpers played heading into commercial breaks.</li>
+                        <li><code>chance</code>: Object with <code>in</code> and <code>out</code> probability expressions (e.g., <code>{"in": "50%", "out": "75%"}</code>).</li>
+                        <li><code>show-override</code>: Object (<code>{"in": bool, "out": bool}</code>) allowing local show bumpers to replace global definitions.</li>
+                    </ul>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>4. Commercial Rules (<code>commercial_times</code> Array)</h2>
+    <p>Evaluated <strong>bottom-to-top</strong> to select commercial pools when commercial insertion is active.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>name</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>Folders containing commercial files.</td>
+            </tr>
+            <tr>
+                <td><code>tag</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Matches against the program's active tag (<code>set-tag</code> or filename <code>@tag@</code>).</td>
+            </tr>
+            <tr>
+                <td><code>channel</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Restricts commercial pool to the active broadcast channel.</td>
+            </tr>
+            <tr>
+                <td><code>prefer-folder</code></td>
+                <td>&lt;string&gt; | &lt;boolean&gt;</td>
+                <td>Picks a folder before selecting an ad.</td>
+            </tr>
+            <tr>
+                <td><code>weighted</code></td>
+                <td><code>[&lt;number&gt;]</code></td>
+                <td>Percentage weights summing to 100 for folder selection.</td>
+            </tr>
+            <tr>
+                <td><code>chance</code></td>
+                <td><code>&lt;string&gt; | &lt;float&gt;</code></td>
+                <td>Probability expression required to activate this ad pool.</td>
+            </tr>
+            <tr>
+                <td><code>between</code>, <code>special</code>, <code>month</code>, <code>min-length</code>, <code>max-length</code></td>
+                <td>-</td>
+                <td>Behaves identically to criteria in the <code>times</code> array.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>5. Keywords & Expression Engine</h2>
+
+    <h3>Path Macros</h3>
+    <ul>
+        <li><code>%D[n]%</code>: Substituted with entry <em>n</em> from the top-level <code>drive</code> array.</li>
+        <li><code>%day%</code>: Weekday integer (Monday = <code>0</code>, Sunday = <code>6</code>).</li>
+        <li><code>%day_of_week%</code>: Lowercase weekday name (<code>monday</code>–<code>sunday</code>).</li>
+        <li><code>%month%</code>: Lowercase month name (<code>january</code>–<code>december</code>).</li>
+        <li><code>%prev-month%</code> / <code>%next-month%</code>: Preceding or subsequent month names.</li>
+    </ul>
+
+    <h3>Time String Placeholders</h3>
+    <ul>
+        <li><code>%HOUR%</code>: 12-hour format hour (<code>01</code>–<code>12</code>).</li>
+        <li><code>%TENSHOUR%</code> / <code>%UNITSHOUR%</code>: Tens or units digit of the current 12-hour value.</li>
+        <li><code>%MIN%</code>: Minute of the hour (<code>00</code>–<code>59</code>).</li>
+        <li><code>%TENSMIN%</code> / <code>%UNITSMIN%</code>: Tens or units digit of the current minute.</li>
+        <li><code>%TOPTENSMIN%</code>: Evaluates strictly to <code>0</code> or <code>3</code> (for :00–:05 or :30–:35 half-hour block alignment).</li>
+        <li><code>%AMPM%</code>: Uppercase <code>AM</code> or <code>PM</code>.</li>
+        <li><code>%MONTH%</code>: 3-letter month abbreviation (e.g., <code>Oct</code>).</li>
+        <li><code>%DAY%</code>: Zero-padded day of month (<code>01</code>–<code>31</code>).</li>
+        <li><code>%YEAR%</code>: 4-digit year.</li>
+        <li><code>%MAXDAYS%</code>: Dynamic day count of the current month.</li>
+    </ul>
+
+    <h3>Supported Holidays (<code>special</code>)</h3>
+    <p>Accepts optional numeric day offsets (e.g., <code>"easter-5"</code>):</p>
+    <p><code>thanksgiving</code>, <code>xmas</code> (period between Thanksgiving and Dec 25), <code>christmas</code> (Dec 25), <code>halloween</code>, <code>mothers day</code>, <code>fathers day</code>, <code>memorial day</code>, <code>easter</code>, <code>new years day</code>, <code>mlk day</code>, <code>valentines day</code>, <code>presidents day</code>, <code>st patricks day</code>, <code>april fools day</code>, <code>independence day</code> (or <code>4th of july</code>), <code>labor day</code>, <code>columbus day</code>, <code>veterans day</code>, <code>christmaseve</code>, <code>new years eve</code>.</p>
+
+    <h3>Mathematical Chance Functions (<code>chance</code>)</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Identifier</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>weekday</code>, <code>month</code>, <code>day</code>, <code>year</code></td>
+                <td>Variables</td>
+                <td>Current calendar values (weekday: Mon=0 to Sun=6; month: 1–12).</td>
+            </tr>
+            <tr>
+                <td><code>hour</code>, <code>minute</code>, <code>second</code></td>
+                <td>Variables</td>
+                <td>Current 24-hour clock values.</td>
+            </tr>
+            <tr>
+                <td><code>maxdays</code></td>
+                <td>Variable</td>
+                <td>Total number of days in the current month.</td>
+            </tr>
+            <tr>
+                <td><code>stamp</code></td>
+                <td>Variable</td>
+                <td>Unix timestamp in seconds since epoch.</td>
+            </tr>
+            <tr>
+                <td><code>date(y, m, d)</code></td>
+                <td>Function</td>
+                <td>Calculates Unix epoch seconds for a given date.</td>
+            </tr>
+            <tr>
+                <td><code>time(h, m=0, s=0)</code></td>
+                <td>Function</td>
+                <td>Converts given time components to total seconds of the day.</td>
+            </tr>
+            <tr>
+                <td><code>datetime(y, mo, d, h=0, mi=0, s=0)</code></td>
+                <td>Function</td>
+                <td>Calculates Unix epoch seconds for a precise date and time.</td>
+            </tr>
+            <tr>
+                <td><code>scale(x)</code></td>
+                <td>Function</td>
+                <td>Divides <code>x</code> by 100.0.</td>
+            </tr>
+            <tr>
+                <td><code>clamp(x, y=1.0)</code></td>
+                <td>Function</td>
+                <td>Restricts <code>x</code> between <code>0.0</code> and <code>y</code>.</td>
+            </tr>
+            <tr>
+                <td><code>bound(x, low, high)</code></td>
+                <td>Function</td>
+                <td>Restricts <code>x</code> between custom <code>low</code> and <code>high</code> boundaries.</td>
+            </tr>
+            <tr>
+                <td><code>sin</code>, <code>cos</code>, <code>tan</code>, <code>log</code>, <code>exp</code>, <code>pi</code>, <code>e</code></td>
+                <td>Math</td>
+                <td>Standard mathematical constants and functions.</td>
+            </tr>
+            <tr>
+                <td><code>abs</code>, <code>min</code>, <code>max</code>, <code>round</code>, <code>floor</code>, <code>ceil</code></td>
+                <td>Math</td>
+                <td>Standard numeric rounding and bounding functions.</td>
+            </tr>
+        </tbody>
+    </table>
+
+</div>
+
+<h3>Details on References</h3>
+    <p>Settings can refer to variables defined within the <code>vars</code> object. This aids in creating reusable, configurable values. The format is <code>$ref/var_name/index/or/key</code>. The variable must be defined before it is referenced.</p>
+    <pre><code>"vars": {
+    "cartoons": { "am": { "start": [4, 0], "end": [10, 45] }, "pm": { "start": [15, 0], "end": [16, 45] } }
+},
+
+"times": [{
+    "name": ["%D[1]%/cartoons/am"],
+    "start": "$ref/cartoons/am/start",
+    "end": "$ref/cartoons/am/end",
+    "type": "video"
+},
+{
+    "name": ["%D[1]%/cartoons/pm"],
+    "start": "$ref/cartoons/pm/start",
+    "end": "$ref/cartoons/pm/end",
+    "type": "video"
+}]</code></pre>
+
+<center><small><i>Generated on Sep. 14, 2026</i></small></center>
+</body>
+</html>
