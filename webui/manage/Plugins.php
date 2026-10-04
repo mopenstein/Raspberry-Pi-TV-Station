@@ -6,6 +6,7 @@ class Plugins implements ManageCard {
     private $html = '';
     private $settings_file = "/home/pi/Desktop/settings.json";
     private $plugins_dir;
+    private $dir_configured = false;
     private $status_msg = '';
 
     function getPluginMetadata(string $filepath): array {
@@ -66,90 +67,222 @@ class Plugins implements ManageCard {
         return $metadata;
     }
 
-	private function ensureDirectoryWritable(string $dir): bool {
-		if (!is_dir($dir)) {
-			return false;
-		}
+    private function initPluginsDirectory(): bool {
+        if (empty($this->plugins_dir)) {
+            $this->dir_configured = false;
+            return false;
+        }
 
-		if (!is_writable($dir)) {
-			// Attempt native PHP chmod to 0777
-			@chmod($dir, 0777);
-			clearstatcache(true, $dir);
+        $this->dir_configured = true;
 
-			// Fallback: use shell execution if native chmod was blocked by ownership/umask
-			if (!is_writable($dir)) {
-				@exec('sudo chmod 0777 ' . escapeshellarg($dir));
-				clearstatcache(true, $dir);
-			}
-		}
+        if (!is_dir($this->plugins_dir)) {
+            @mkdir($this->plugins_dir, 0775, true);
 
-		return is_writable($dir);
-	}
+            if (!is_dir($this->plugins_dir)) {
+                @exec('sudo mkdir -p ' . escapeshellarg($this->plugins_dir));
+            }
 
-	private function handleUpload() {
-		if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['plugin_file'])) {
-			if (empty($this->plugins_dir) || !is_dir($this->plugins_dir)) {
-				$this->status_msg = 'Error: Invalid plugins directory.';
-				return;
-			}
+            @chown($this->plugins_dir, 'pi');
+            @chgrp($this->plugins_dir, 'pi');
+            @exec('sudo chown -R pi:pi ' . escapeshellarg($this->plugins_dir));
 
-			// Verify and adjust folder permissions prior to write
-			if (!$this->ensureDirectoryWritable($this->plugins_dir)) {
-				$this->status_msg = 'Error: Cannot write to plugins directory (permissions lock).';
-				return;
-			}
+            @chmod($this->plugins_dir, 0775);
+            @exec('sudo chmod 0775 ' . escapeshellarg($this->plugins_dir));
+            clearstatcache(true, $this->plugins_dir);
+        }
 
-			$file = $_FILES['plugin_file'];
-			if ($file['error'] !== UPLOAD_ERR_OK) {
-				$this->status_msg = 'Upload failed with code: ' . $file['error'];
-				return;
-			}
+        return is_dir($this->plugins_dir);
+    }
 
-			$rawFilename = basename($file['name']);
-			if (substr($rawFilename, -3) !== '.py') {
-				$this->status_msg = 'Error: Only .py plugin files are permitted.';
-				return;
-			}
+    private function ensureDirectoryWritable(string $dir): bool {
+        if (!is_dir($dir)) {
+            return false;
+        }
 
-			$dest = rtrim($this->plugins_dir, '/') . '/' . $rawFilename;
-			$disabledTarget = $dest . '.disabled';
+        if (!is_writable($dir)) {
+            @chmod($dir, 0775);
+            clearstatcache(true, $dir);
 
-			// Overwrite disabled file directly if existing plugin is toggled off
-			if (file_exists($disabledTarget)) {
-				$dest = $disabledTarget;
-			}
+            if (!is_writable($dir)) {
+                @exec('sudo chmod 0775 ' . escapeshellarg($dir));
+                @exec('sudo chown -R pi:pi ' . escapeshellarg($dir));
+                clearstatcache(true, $dir);
+            }
+        }
 
-			// If target file already exists, ensure it is also writable before overwrite
-			if (file_exists($dest) && !is_writable($dest)) {
-				@chmod($dest, 0777);
-				@exec('sudo chmod 0777 ' . escapeshellarg($dest));
-			}
+        return is_writable($dir);
+    }
 
-			if (move_uploaded_file($file['tmp_name'], $dest)) {
-				@chmod($dest, 0755);
-				@exec('sudo chmod 0755 ' . escapeshellarg($dest));
-				$this->status_msg = 'Successfully installed/updated: ' . htmlspecialchars($rawFilename);
-			} else {
-				$this->status_msg = 'Error: Failed to save file to ' . htmlspecialchars($dest);
-			}
-		}
-	}
+    private function handlePackageUpload(string $zipPath, string $origFilename) {
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath) !== true) {
+            $this->status_msg = 'Error: Failed to open archive ' . htmlspecialchars($origFilename);
+            return;
+        }
+
+        // Map base filenames to archive index positions
+        $pyFiles = [];
+        $docFiles = [];
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            $base = basename($name);
+
+            // Skip directories and hidden / metadata files
+            if (substr($name, -1) === '/' || $base[0] === '.' || strpos($name, '__MACOSX') !== false) {
+                continue;
+            }
+
+            if (substr($base, -3) === '.py') {
+                $rootName = substr($base, 0, -3);
+                $pyFiles[$rootName] = [
+                    'archive_index' => $i,
+                    'filename' => $base
+                ];
+            } elseif (substr($base, -12) === '.plugin.html') {
+                $rootName = substr($base, 0, -12);
+                $docFiles[$rootName] = [
+                    'archive_index' => $i,
+                    'filename' => $base
+                ];
+            }
+        }
+
+        if (empty($pyFiles)) {
+            $zip->close();
+            $this->status_msg = 'Error: Package contained no valid .py plugin files.';
+            return;
+        }
+
+        $docsDir = '/var/www/html/docs';
+        if (!is_dir($docsDir)) {
+            @mkdir($docsDir, 0775, true);
+            @exec('sudo mkdir -p ' . escapeshellarg($docsDir));
+            @exec('sudo chown -R pi:www-data ' . escapeshellarg($docsDir));
+            @exec('sudo chmod 0775 ' . escapeshellarg($docsDir));
+        }
+
+        $installed = [];
+
+        foreach ($pyFiles as $rootName => $info) {
+            // 1. Extract Python plugin
+            $pyDest = rtrim($this->plugins_dir, '/') . '/' . $info['filename'];
+            $disabledTarget = $pyDest . '.disabled';
+            if (file_exists($disabledTarget)) {
+                $pyDest = $disabledTarget;
+            }
+
+            $stream = $zip->getStream($zip->getNameIndex($info['archive_index']));
+            if ($stream) {
+                file_put_contents($pyDest, stream_get_contents($stream));
+                fclose($stream);
+
+                @chmod($pyDest, 0755);
+                @chown($pyDest, 'pi');
+                @chgrp($pyDest, 'pi');
+                @exec('sudo chown pi:pi ' . escapeshellarg($pyDest));
+                @exec('sudo chmod 0755 ' . escapeshellarg($pyDest));
+            }
+
+            // 2. Extract paired documentation file if present
+            $docAdded = false;
+            if (isset($docFiles[$rootName])) {
+                $docInfo = $docFiles[$rootName];
+                $docDest = rtrim($docsDir, '/') . '/' . $docInfo['filename'];
+                $docStream = $zip->getStream($zip->getNameIndex($docInfo['archive_index']));
+
+                if ($docStream) {
+                    file_put_contents($docDest, stream_get_contents($docStream));
+                    fclose($docStream);
+
+                    @chmod($docDest, 0664);
+                    @exec('sudo chmod 0664 ' . escapeshellarg($docDest));
+                    @exec('sudo chown pi:www-data ' . escapeshellarg($docDest));
+                    $docAdded = true;
+                }
+            }
+
+            $installed[] = htmlspecialchars($info['filename']) . ($docAdded ? ' (+docs)' : '');
+        }
+
+        $zip->close();
+        $this->status_msg = 'Successfully installed package: ' . implode(', ', $installed);
+    }
+
+    private function handleUpload() {
+        if (!$this->dir_configured || empty($this->plugins_dir) || !is_dir($this->plugins_dir)) {
+            return;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['plugin_file'])) {
+            if (!$this->ensureDirectoryWritable($this->plugins_dir)) {
+                $this->status_msg = 'Error: Cannot write to plugins directory (permissions lock).';
+                return;
+            }
+
+            $file = $_FILES['plugin_file'];
+            if ($file['error'] !== UPLOAD_ERR_OK) {
+                $this->status_msg = 'Upload failed with code: ' . $file['error'];
+                return;
+            }
+
+            $rawFilename = basename($file['name']);
+            $lowerFilename = strtolower($rawFilename);
+
+            // Handle .tvplugin and .zip packages
+            if (substr($lowerFilename, -9) === '.tvplugin' || substr($lowerFilename, -4) === '.zip') {
+                $this->handlePackageUpload($file['tmp_name'], $rawFilename);
+                return;
+            }
+
+            // Handle standalone .py files (preserves original upload behavior)
+            if (substr($rawFilename, -3) !== '.py') {
+                $this->status_msg = 'Error: Only .tvplugin packages, .zip archives, or .py files are permitted.';
+                return;
+            }
+
+            $dest = rtrim($this->plugins_dir, '/') . '/' . $rawFilename;
+            $disabledTarget = $dest . '.disabled';
+
+            if (file_exists($disabledTarget)) {
+                $dest = $disabledTarget;
+            }
+
+            if (file_exists($dest) && !is_writable($dest)) {
+                @chmod($dest, 0775);
+                @exec('sudo chmod 0775 ' . escapeshellarg($dest));
+            }
+
+            if (move_uploaded_file($file['tmp_name'], $dest)) {
+                @chmod($dest, 0755);
+                @chown($dest, 'pi');
+                @chgrp($dest, 'pi');
+                @exec('sudo chown pi:pi ' . escapeshellarg($dest));
+                @exec('sudo chmod 0755 ' . escapeshellarg($dest));
+                $this->status_msg = 'Successfully installed/updated: ' . htmlspecialchars($rawFilename);
+            } else {
+                $this->status_msg = 'Error: Failed to save file to ' . htmlspecialchars($dest);
+            }
+        }
+    }
 
     private function handleToggleAction() {
+        if (!$this->dir_configured || empty($this->plugins_dir) || !is_dir($this->plugins_dir)) {
+            return;
+        }
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_plugin'])) {
             $filename = basename($_POST['toggle_plugin']);
             $currentPath = rtrim($this->plugins_dir, '/') . '/' . $filename;
 
             if (file_exists($currentPath)) {
                 if (substr($filename, -9) === '.disabled') {
-                    // Enable: strip .disabled and ensure executable bit persists
                     $newPath = substr($currentPath, 0, -9);
                     if (@rename($currentPath, $newPath)) {
                         @chmod($newPath, 0755);
                         @exec('chmod +x ' . escapeshellarg($newPath));
                     }
                 } elseif (substr($filename, -3) === '.py') {
-                    // Disable: append .disabled
                     $newPath = $currentPath . '.disabled';
                     @rename($currentPath, $newPath);
                 }
@@ -160,13 +293,17 @@ class Plugins implements ManageCard {
     public function __construct() {
         global $json_response;
         $this->plugins_dir = $json_response[0]["plugins directory"] ?? null;
-        
-        $this->handleUpload();
-        $this->handleToggleAction();
+
+        $dirReady = $this->initPluginsDirectory();
+
+        if ($dirReady) {
+            $this->handleUpload();
+            $this->handleToggleAction();
+        }
 
         $plugins = [];
 
-        if (!empty($this->plugins_dir) && is_dir($this->plugins_dir)) {
+        if ($dirReady) {
             $files = glob($this->plugins_dir . '/*.{py,disabled}', GLOB_BRACE);
             if ($files) {
                 foreach ($files as $file) {
@@ -177,8 +314,15 @@ class Plugins implements ManageCard {
                     $meta = $this->getPluginMetadata($file);
                     $base = basename($file);
 
+                    // Extract base name without .py or .py.disabled
+                    $cleanName = preg_replace('/(\.py)?(\.disabled)?$/', '', $base);
+                    $docFilename = $cleanName . '.plugin.html';
+                    $docFsPath = '/var/www/html/docs/' . $docFilename;
+
                     $meta['filename'] = $base;
                     $meta['is_enabled'] = (substr($base, -9) !== '.disabled');
+                    $meta['doc_url'] = file_exists($docFsPath) ? ('/docs/' . rawurlencode($docFilename)) : null;
+
                     $plugins[] = $meta;
                 }
             }
@@ -196,6 +340,17 @@ class Plugins implements ManageCard {
                 gap: 8px;
                 padding: 4px 0;
                 font-family: inherit;
+            }
+
+            .plugin-warning-box {
+                background: rgba(220, 160, 20, 0.12);
+                border: 1px solid rgba(220, 160, 20, 0.35);
+                border-radius: 4px;
+                padding: 10px 14px;
+                margin-bottom: 8px;
+                font-size: 0.8rem;
+                color: #e0bb6b;
+                line-height: 1.4;
             }
 
             .plugin-upload-bar {
@@ -222,13 +377,13 @@ class Plugins implements ManageCard {
             .plugin-upload-bar input[type="file"] {
                 font-size: 0.75rem;
                 color: #aaa;
-                max-width: 220px;
+                max-width: 240px;
             }
 
             .plugin-status-msg {
                 font-size: 0.75rem;
                 color: #4ec9b0;
-                margin-bottom: 6px;
+                margin: 6px;
                 font-family: monospace;
             }
 
@@ -339,10 +494,22 @@ class Plugins implements ManageCard {
             .plugin-subline {
                 display: flex;
                 justify-content: space-between;
+                align-items: center;
                 font-family: monospace;
                 font-size: 0.72rem;
                 opacity: 0.6;
                 margin-bottom: 6px;
+            }
+
+            .plugin-doc-link {
+                color: #5294e2;
+                text-decoration: none;
+                margin-left: 8px;
+            }
+
+            .plugin-doc-link:hover {
+                text-decoration: underline;
+                color: #73a9eb;
             }
 
             .plugin-desc {
@@ -354,12 +521,22 @@ class Plugins implements ManageCard {
         </style>
         <div class="plugin-stack">';
 
+        if (!$this->dir_configured) {
+            $out .= '
+            <div class="plugin-warning-box">
+                <strong>No Plugin Directory Configured</strong><br>
+                Please set the <code>"plugins directory"</code> path in your <code>settings.json</code> file to enable plugin management.
+            </div>
+            </div>';
+            return $out;
+        }
+
         if (!empty($this->status_msg)) {
             $out .= '<div class="plugin-status-msg">' . $this->status_msg . '</div>';
         }
 
         if (empty($plugins)) {
-            $out .= '<div style="padding: 12px; opacity: 0.6; font-size: 0.85rem;">No plugins detected.</div>';
+            $out .= '<div style="padding: 12px; opacity: 0.6; font-size: 0.85rem;">No plugins detected in directory.</div>';
         } else {
             foreach ($plugins as $plugin) {
                 $name      = htmlspecialchars($plugin['name'] ?? $plugin['filename']);
@@ -368,9 +545,15 @@ class Plugins implements ManageCard {
                 $file      = htmlspecialchars($plugin['filename']);
                 $desc      = nl2br(htmlspecialchars($plugin['description'] ?? 'No description provided.'));
                 $isEnabled = $plugin['is_enabled'];
+                $docUrl    = $plugin['doc_url'] ?? null;
 
                 $statusClass = $isEnabled ? '' : 'is-disabled';
                 $btnLabel    = $isEnabled ? 'Disable' : 'Enable';
+
+                $docLinkHtml = '';
+                if ($docUrl !== null) {
+                    $docLinkHtml = '<a class="plugin-doc-link" href="' . htmlspecialchars($docUrl) . '" target="_blank" rel="noopener noreferrer">[Docs]</a>';
+                }
 
                 $out .= '
                 <details class="plugin-row ' . $statusClass . '">
@@ -391,7 +574,10 @@ class Plugins implements ManageCard {
                     </summary>
                     <div class="plugin-drawer">
                         <div class="plugin-subline">
-                            <span>' . $file . '</span>
+                            <div>
+                                <span>' . $file . '</span>
+                                ' . $docLinkHtml . '
+                            </div>
                             ' . ($date ? '<span>' . $date . '</span>' : '') . '
                         </div>
                         <div class="plugin-desc">' . $desc . '</div>
@@ -402,13 +588,12 @@ class Plugins implements ManageCard {
 
         $out .= '</div>';
 
-		        // Upload control bar
         $out .= '
         <div class="plugin-upload-bar">
-			<div style="width:100%; font-size:75%; border-bottom: 1px dashed rgba(255, 255, 255, 0.15);; padding: 5px;">Upload/update a plugin (.py file):</div>
+            <div style="width:100%; font-size:75%; border-bottom: 1px dashed rgba(255, 255, 255, 0.15); padding: 5px;">Install/update plugin (.tvplugin, .zip, or .py):</div>
             <form method="POST" enctype="multipart/form-data">
-                <input type="file" name="plugin_file" accept=".py" required>
-                <button type="submit" class="plugin-btn">Add</button>
+                <input type="file" name="plugin_file" accept=".tvplugin,.zip,.py" required>
+                <button type="submit" class="plugin-btn">Install</button>
             </form>
         </div>';
         return $out;
