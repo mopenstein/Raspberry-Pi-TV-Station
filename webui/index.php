@@ -306,60 +306,82 @@ interface ManageCard {
 }
 
 function prepareManageView($json_settings, $db_manage_ext) {
-	global $mysqli;
-	// Centralized link repository for the Manage tab
+    global $mysqli;
 
-	//load manage cards
-	$manage_cards = [];
+    $manage_cards = [];
 
-	foreach (glob('manage/*.php') as $card_file) {
-		include_once($card_file);
-		//class name must match file name for this to work, and must implement ManageCard interface
-		$class_name = pathinfo($card_file, PATHINFO_FILENAME);
+    foreach (glob('manage/*.php') as $card_file) {
+        $class_name = pathinfo($card_file, PATHINFO_FILENAME);
 
-		if (class_exists($class_name)) {
-			if (!is_subclass_of($class_name, 'ManageCard')) {
-				echo "<!-- Skipping $class_name because it does not implement ManageCard interface -->\n";
-				continue;
-			}
-			$card_instance = new $class_name();
+        try {
+            // Loading the file can trigger ParseError or CompileError in PHP 7
+            include_once($card_file);
 
-			if(!$card_instance->name()) {
-				echo "<!-- Skipping Card: $class_name because name() is empty -->\n";
-				continue;
-			}
+            if (!class_exists($class_name)) {
+                continue;
+            }
 
-			if (method_exists($card_instance, 'setMysqli')) {
+            if (!is_subclass_of($class_name, 'ManageCard')) {
+                echo "<!-- Skipping $class_name because it does not implement ManageCard interface -->\n";
+                continue;
+            }
+
+            $card_instance = new $class_name();
+
+            $card_name = $card_instance->name();
+            if (!$card_name) {
+                echo "<!-- Skipping Card: $class_name because name() is empty -->\n";
+                continue;
+            }
+
+            if (method_exists($card_instance, 'setMysqli')) {
                 $card_instance->setMysqli($mysqli);
             }
 
-			if (method_exists($card_instance, 'setSettings')) {
+            if (method_exists($card_instance, 'setSettings')) {
                 $card_instance->setSettings($json_settings);
             }
 
-			$priority = 0;
-			if (method_exists($card_instance, 'priority')) {
-				$priority = (int)$card_instance->priority();
-			}
+            $priority = 0;
+            if (method_exists($card_instance, 'priority')) {
+                $priority = (int)$card_instance->priority();
+            }
 
-			if ($card_instance instanceof ManageCard) {
-				$manage_cards[$class_name] = [
-					'name' => $card_instance->name(),
-					'html' => $card_instance->html(),
-					'links' => $card_instance->links(),
-    				'priority' => $priority
-				];
-			}
-		}
-	}
+            $manage_cards[$class_name] = [
+                'name'     => $card_name,
+                'html'     => $card_instance->html(),
+                'links'    => $card_instance->links(),
+                'priority' => $priority
+            ];
 
-	uasort($manage_cards, function($a, $b) {
-		return $b['priority'] <=> $a['priority'];
-	});
+        } catch (\Throwable $e) {
+            // Traps both Exceptions and PHP 7 engine Errors (ParseError, TypeError, Error)
+            $safe_file = htmlspecialchars(basename($card_file));
+            $safe_msg  = htmlspecialchars($e->getMessage());
+            $safe_line = (int)$e->getLine();
 
-    // Centralized link repository
+            $warning_html = '
+            <div style="background: rgba(220, 50, 50, 0.12); border: 1px solid rgba(220, 50, 50, 0.35); border-radius: 4px; padding: 12px 14px; font-size: 0.8rem; color: #f08080; line-height: 1.4; font-family: monospace;">
+                <div style="font-weight: bold; margin-bottom: 4px; font-family: sans-serif;">Card Load Failure: ' . $safe_file . '</div>
+                <div style="color: #ffb4b4; margin-bottom: 4px;">' . $safe_msg . '</div>
+                <div style="opacity: 0.7; font-size: 0.75rem;">Line: ' . $safe_line . ' in ' . $safe_file . '</div>
+            </div>';
+
+            $manage_cards['error_' . $class_name] = [
+                'name'     => 'Error: ' . $class_name,
+                'html'     => $warning_html,
+                'links'    => [],
+                'priority' => -9999 // Anchors broken cards to the bottom of the stack
+            ];
+        }
+    }
+
+    uasort($manage_cards, function($a, $b) {
+        return $b['priority'] <=> $a['priority'];
+    });
+
     return [
-        'cards' 		  => $manage_cards
+        'cards' => $manage_cards
     ];
 }
 

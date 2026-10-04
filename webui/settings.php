@@ -94,16 +94,29 @@ function json_validator($data=NULL) {
 }
 
 $settings_file = "/home/pi/Desktop/settings.json";
-$backup_dir = dirname($settings_file);
+$backup_dir = "/home/pi/settings_backups/";
 $base_name = basename($settings_file);
 $is_writable = is_writable($settings_file);
+
+// Helper: Ensure pi user retains full read/write access
+function ensure_permissions($file) {
+    if (file_exists($file)) {
+        @chmod($file, 0666);
+        @chown($file, 'pi');
+        @chgrp($file, 'pi');
+    }
+}
 
 // Helper: create rotating backup
 function create_backup($settings_file, $backup_dir, $base_name) {
     if (file_exists($settings_file)) {
+        if (!is_dir($backup_dir)) {
+            mkdir($backup_dir, 0777, true);
+        }
         $timestamp = date('Ymd_His');
         $backup_file = $backup_dir . '/' . $base_name . '.bak_' . $timestamp;
         copy($settings_file, $backup_file);
+        ensure_permissions($backup_file);
 
         $backups = glob($backup_dir . '/' . $base_name . '.bak_*');
         usort($backups, function($a, $b) { return filemtime($b) - filemtime($a); });
@@ -130,7 +143,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'preview_backup' && !empty($_G
 }
 
 // 1. Export settings.json
-if (isset($_GET['action']) &&$_GET['action'] === 'export') {
+if (isset($_GET['action']) && $_GET['action'] === 'export') {
     if (file_exists($settings_file)) {
         header('Content-Description: File Transfer');
         header('Content-Type: application/json');
@@ -157,6 +170,7 @@ if (isset($_POST["restore_server_backup"]) && !empty($_POST["backup_filename"]))
         if ($val[0]) {
             create_backup($settings_file, $backup_dir,$base_name);
             file_put_contents($settings_file,$content);
+            ensure_permissions($settings_file);
             header("Location: settings.php?msg=restored");
             exit;
         } else {
@@ -175,6 +189,7 @@ if (isset($_POST["upload_backup"]) && isset($_FILES["backup_file"])) {
         if ($val[0]) {
             create_backup($settings_file, $backup_dir,$base_name);
             file_put_contents($settings_file,$uploaded_content);
+            ensure_permissions($settings_file);
             header("Location: settings.php?msg=uploaded");
             exit;
         } else {
@@ -191,7 +206,7 @@ if (isset($_POST["upload_backup"]) && isset($_FILES["backup_file"])) {
 
 // 4. Handle Save
 if (isset($_POST["settings"]) && isset($_POST["save"])) {
-    $raw_json =$_POST["settings"];
+    $raw_json = $_POST["settings"];
     $json_valid = json_validator($raw_json);
     
     if (!$json_valid[0]) {
@@ -204,9 +219,10 @@ if (isset($_POST["settings"]) && isset($_POST["save"])) {
 
     create_backup($settings_file, $backup_dir,$base_name);
 
-    $temp_file =$settings_file . '.tmp';
-    if (file_put_contents($temp_file,$raw_json) !== false) {
-        rename($temp_file,$settings_file);
+    $temp_file = $settings_file . '.tmp';
+    if (file_put_contents($temp_file, $raw_json) !== false) {
+        rename($temp_file, $settings_file);
+        ensure_permissions($settings_file);
         header("Location: settings.php?saved=yes");
         exit();
     } else {
@@ -402,6 +418,12 @@ $json_data = file_exists($settings_file) ? file_get_contents($settings_file) : "
             border-radius: 4px;
         }
 
+        /* Hide mobile card view by default on desktop */
+        /* Hide mobile card view by default on desktop */
+        .mobile-backup-cards {
+            display: none;
+        }
+
         /* Mobile Adjustments */
         @media (max-width: 680px) {
             body { margin: 8px; }
@@ -413,6 +435,7 @@ $json_data = file_exists($settings_file) ? file_get_contents($settings_file) : "
 
             /* Switch Table to Stacked Cards */
             .backup-table, .backup-table thead, .backup-table tbody, .backup-table th { display: none; }
+            .mobile-backup-cards { display: block; }
             .backup-card {
                 display: flex;
                 flex-direction: column;
@@ -477,7 +500,7 @@ $json_data = file_exists($settings_file) ? file_get_contents($settings_file) : "
             <button type="submit" name="save" class="btn btn-save" <?php echo !$is_writable ? 'disabled' : ''; ?>>Save Changes</button>
             <button type="button" class="btn btn-action" onclick="openRestoreModal()">Backups & Restore</button>
             <a class="btn btn-action" href="settings.php?action=export">Export JSON</a>
-            <a class="btn btn-action" href="settings-doc.html" target="_blank">Docs</a>
+            <a class="btn btn-action" href="/docs/settings.html" target="_blank">Docs</a>
             <button type="button" class="btn btn-action" onclick="testSettings()">Live Test</button>
             
             <?php if(isset($_GET["saved"])): ?>
