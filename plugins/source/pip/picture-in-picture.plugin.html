@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Picture-in-Picture Plugin Documentation</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 2em;
+            background-color: #12151a;
+            color: #d8dee9;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            background-color: #1c2026;
+            padding: 2.5em;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            border: 1px solid #2e3440;
+        }
+        h1, h2, h3 {
+            color: #eceff4;
+            border-bottom: 2px solid #2e3440;
+            padding-bottom: 0.3em;
+            margin-top: 1.5em;
+        }
+        h1 { font-size: 2.2em; }
+        h2 { font-size: 1.6em; }
+        h3 { font-size: 1.25em; }
+        p { margin-bottom: 1em; }
+        code {
+            background-color: #15181e;
+            padding: 0.15em 0.4em;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            color: #e5c07b;
+            border: 1px solid #252b33;
+        }
+        pre {
+            background-color: #15181e;
+            color: #abb2bf;
+            padding: 1.2em;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #252b33;
+        }
+        strong {
+            color: #eceff4;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5em;
+            margin-bottom: 1.5em;
+        }
+        th, td {
+            padding: 0.85em;
+            text-align: left;
+            border-bottom: 1px solid #2e3440;
+            vertical-align: top;
+        }
+        th {
+            background-color: #252b33;
+            font-weight: bold;
+            color: #eceff4;
+        }
+        tr:nth-child(even) {
+            background-color: #171b21;
+        }
+        .note {
+            background-color: #1a2330;
+            padding: 1.1em;
+            border-left: 4px solid #5294e2;
+            margin: 1.2em 0;
+            border-radius: 4px;
+            color: #cfd8dc;
+        }
+        .alert {
+            background-color: #2a2318;
+            padding: 1.1em;
+            border-left: 4px solid #d19a66;
+            margin: 1.2em 0;
+            border-radius: 4px;
+            color: #e5c07b;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #2e3440;
+            margin: 2em 0;
+        }
+        ul {
+            padding-left: 1.4em;
+        }
+        li {
+            margin-bottom: 0.4em;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <h1>Picture-in-Picture Plugin Documentation</h1>
+
+    <p><strong>Plugin File:</strong> <code>picture-in-picture.py</code></p>
+    <p><strong>Keyword / Type:</strong> <code>pip</code></p>
+    <p><strong>Supported Plugin Version:</strong> <code>1.6</code> (2026.10.04)</p>
+    <p><strong>Purpose:</strong> Spawns a multi-layered video presentation leveraging DispmanX hardware layering in OMXPlayer. Runs a primary background video on Layer 1 alongside a secondary windowed video overlay on Layer 2 with support for positional presets, audio ducking, transparency, loop control, and interval delays.</p>
+
+    <div class="note">
+        <strong>Hardware Layering Architecture</strong><br>
+        The primary presentation executes on OMXPlayer <code>--layer 1</code>, while the overlay presentation executes on <code>--layer 2</code>. The master timeline is strictly tied to the primary video stream: when the primary video completes playback or encounters an exit condition, all secondary overlay instances are immediately terminated and cleaned up.
+    </div>
+
+    <hr>
+
+    <h2>1. Schedule Block Structure</h2>
+    <p>PiP rules are defined directly within the standard <code>times</code> schedule array in <code>settings.json</code> using <code>"type": "pip"</code>. Configuration parameters are grouped under the <code>primary</code> and <code>overlay</code> objects.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>name</code></td>
+                <td><code>[&lt;string&gt;]</code></td>
+                <td>Target path or directory reference (supports standard macros such as <code>%D[1]%</code>). Acts as the fallback root for relative media sources.</td>
+            </tr>
+            <tr>
+                <td><code>type</code></td>
+                <td>&lt;string&gt;</td>
+                <td>Must be set to <code>"pip"</code> to trigger the plugin handler.</td>
+            </tr>
+            <tr>
+                <td><code>primary</code></td>
+                <td>&lt;object&gt;</td>
+                <td>Configuration object defining the primary base video stream running on Layer 1.</td>
+            </tr>
+            <tr>
+                <td><code>overlay</code></td>
+                <td>&lt;object&gt;</td>
+                <td>Optional configuration object defining the secondary overlay video stream running on Layer 2.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>2. Primary Object Configuration</h2>
+    <p>Defines the main background video stream.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>source</code></td>
+                <td><code>[&lt;string&gt;] | &lt;string&gt;</code></td>
+                <td><em>Required</em></td>
+                <td>Directory or path containing video files. Supports paths relative to the rule's <code>name</code> directory, or absolute paths prefixed with <code>@</code> (e.g., <code>"@%D[1]%/movies"</code>).</td>
+            </tr>
+            <tr>
+                <td><code>type</code></td>
+                <td>&lt;string&gt;</td>
+                <td><code>"random"</code></td>
+                <td>File selection algorithm: <code>"random"</code> (chooses randomly from matching video formats) or <code>"first"</code> (picks the first file alphabetically).</td>
+            </tr>
+            <tr>
+                <td><code>volume</code></td>
+                <td>&lt;integer&gt; | &lt;float&gt;</td>
+                <td><code>10</code></td>
+                <td>Audio loudness scaled from <code>0</code> to <code>10</code>. <code>0</code> disables hardware audio entirely (<code>-n -1</code>), while <code>10</code> represents standard unity gain (0 mB). Clamped to a maximum value of 10.0.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <hr>
+
+    <h2>3. Overlay Object Configuration</h2>
+    <p>Defines the secondary floating window video stream.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Field</th>
+                <th>Type</th>
+                <th>Default</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>source</code></td>
+                <td><code>[&lt;string&gt;] | &lt;string&gt;</code></td>
+                <td><em>Required</em></td>
+                <td>Target directory containing video assets for the overlay. Supports relative paths and absolute paths with the <code>@</code> prefix.</td>
+            </tr>
+            <tr>
+                <td><code>type</code></td>
+                <td>&lt;string&gt;</td>
+                <td><code>"random"</code></td>
+                <td>File selection mode across the target directory (<code>"random"</code> or <code>"first"</code>).</td>
+            </tr>
+            <tr>
+                <td><code>position</code></td>
+                <td><code>[&lt;int&gt;] | &lt;string&gt;</code></td>
+                <td><code>"bottom-right"</code></td>
+                <td>
+                    Bounding box coordinates on the 640&times;480 canvas. Accepts explicit coordinates or named presets:
+                    <ul>
+                        <li>Array: <code>[x1, y1, x2, y2]</code> (e.g., <code>[160, 120, 500, 360]</code>).</li>
+                        <li>Presets: <code>"top-right"</code>, <code>"top-left"</code>, <code>"bottom-right"</code>, <code>"bottom-left"</code>, <code>"center"</code>. Presets default to a 200&times;150 window adjusted by <code>margin</code>.</li>
+                    </ul>
+                </td>
+            </tr>
+            <tr>
+                <td><code>margin</code></td>
+                <td>&lt;integer&gt;</td>
+                <td><code>20</code></td>
+                <td>Canvas margin in pixels used when <code>position</code> is configured via preset strings.</td>
+            </tr>
+            <tr>
+                <td><code>volume</code></td>
+                <td>&lt;integer&gt; | &lt;float&gt;</td>
+                <td><code>0</code></td>
+                <td>Audio volume scale from <code>0</code> (muted) to <code>10</code> (maximum/unity).</td>
+            </tr>
+            <tr>
+                <td><code>duck-primary</code></td>
+                <td>&lt;integer&gt; | &lt;float&gt;</td>
+                <td><code>null</code></td>
+                <td>When active, dynamically reduces the primary video's volume to this level while the overlay is actively playing. Automatically restores primary volume when the overlay stops or enters a <code>wait</code> interval.</td>
+            </tr>
+            <tr>
+                <td><code>alpha</code></td>
+                <td>&lt;integer&gt;</td>
+                <td><code>255</code></td>
+                <td>Overlay window opacity/transparency from <code>0</code> (fully invisible) to <code>255</code> (fully opaque).</td>
+            </tr>
+            <tr>
+                <td><code>delay</code> / <code>start-offset</code></td>
+                <td>&lt;float&gt; | &lt;integer&gt;</td>
+                <td><code>0</code></td>
+                <td>Seconds to wait after the primary video begins before spawning the overlay window for the first time.</td>
+            </tr>
+            <tr>
+                <td><code>duration</code></td>
+                <td>&lt;float&gt; | &lt;integer&gt;</td>
+                <td><code>null</code></td>
+                <td>Maximum seconds an individual overlay video clip is permitted to play before prematurely ending and cycling to the next loop iteration.</td>
+            </tr>
+            <tr>
+                <td><code>wait</code> / <code>sleep</code></td>
+                <td>&lt;float&gt; | &lt;integer&gt;</td>
+                <td><code>0</code></td>
+                <td>Cooldown duration (in seconds) between loop cycles. The overlay window closes during this interval and re-spawns once the timer elapses.</td>
+            </tr>
+            <tr>
+                <td><code>max-duration</code> / <code>max-runtime</code></td>
+                <td>&lt;float&gt; | &lt;integer&gt;</td>
+                <td><code>null</code></td>
+                <td>Hard global ceiling in seconds for the overlay stream across all loops combined. Once reached, the overlay is killed permanently for the remainder of the block.</td>
+            </tr>
+            <tr>
+                <td><code>loop</code></td>
+                <td>&lt;integer&gt; | &lt;null&gt;</td>
+                <td><code>-1</code></td>
+                <td>
+                    Controls overlay playback repetition:
+                    <ul>
+                        <li><code>-1</code> or <code>null</code>: Loops indefinitely until the primary video finishes.</li>
+                        <li><code>0</code>: Disables the overlay entirely (runs primary stream only).</li>
+                        <li><code>1</code> or greater: Runs for the specified number of loop cycles.</li>
+                    </ul>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="alert">
+        <strong>Audio Ducking Timing</strong><br>
+        If <code>duck-primary</code> is defined and <code>delay</code> is set to <code>0</code>, the primary stream initializes in a pre-ducked state. If <code>wait</code> is configured between loops, primary audio volume is restored during each wait window and ducked again when the subsequent overlay clip begins.
+    </div>
+
+    <hr>
+
+    <h2>4. Configuration Examples</h2>
+
+    <h3>4.1 Feature Showcase (All Settings Combined)</h3>
+    <p>Plays a primary feature with a delayed, repeating promotional overlay positioned in the top-right corner. The primary audio ducks during playback and restores during intermediate delays.</p>
+    <pre><code>{
+    "name": ["%D[1]%/broadcast/features"],
+    "type": "pip",
+    "primary": {
+        "source": ["movies/action"],
+        "type": "random",
+        "volume": 10
+    },
+    "overlay": {
+        "source": ["commercials/promos"],
+        "type": "random",
+        "position": "top-right",
+        "margin": 25,
+        "alpha": 220,
+        "volume": 10,
+        "duck-primary": 3,
+        "delay": 15,
+        "duration": 10,
+        "wait": 5,
+        "max-duration": 60,
+        "loop": 3
+    }
+}</code></pre>
+
+    <h3>4.2 Transparent Corner Bug / Watermark</h3>
+    <p>Displays an ongoing, silent, semi-transparent watermark logo in the bottom-left corner with no audio alteration.</p>
+    <pre><code>{
+    "name": ["%D[1]%/broadcast/shows"],
+    "type": "pip",
+    "primary": {
+        "source": ["sitcoms"],
+        "type": "random",
+        "volume": 10
+    },
+    "overlay": {
+        "source": ["graphics/station_bugs"],
+        "type": "random",
+        "position": "bottom-left",
+        "margin": 15,
+        "alpha": 160,
+        "volume": 0,
+        "loop": -1
+    }
+}</code></pre>
+
+    <h3>4.3 Precise Coordinate Overlay (Custom Window)</h3>
+    <p>Positions a custom 340&times;240 overlay window centered on the display using explicit coordinates <code>[x1, y1, x2, y2]</code>.</p>
+    <pre><code>{
+    "name": ["%D[1]%/broadcast/special"],
+    "type": "pip",
+    "primary": {
+        "source": ["documentaries"],
+        "volume": 8
+    },
+    "overlay": {
+        "source": ["trailers"],
+        "position": [150, 120, 490, 360],
+        "volume": 10,
+        "duck-primary": 2,
+        "loop": 1
+    }
+}</code></pre>
+
+</div>
+
+<center><small><i>Generated on Oct. 04, 2026</i></small></center>
+</body>
+</html>
