@@ -1,5 +1,5 @@
 {
-	"version": "0.992",
+	"version": "0.996",
 	"drive": ["/media/pi/ssd", "/media/pi/ssd_b"],
 	"name": "TV Station Name",
 	"insert_commercials": true,
