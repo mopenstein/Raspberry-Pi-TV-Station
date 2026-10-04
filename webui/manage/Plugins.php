@@ -86,8 +86,8 @@ class Plugins implements ManageCard {
             @chgrp($this->plugins_dir, 'pi');
             @exec('sudo chown -R pi:pi ' . escapeshellarg($this->plugins_dir));
 
-            @chmod($this->plugins_dir, 0775);
-            @exec('sudo chmod 0775 ' . escapeshellarg($this->plugins_dir));
+            @chmod($this->plugins_dir, 0777);
+            @exec('sudo chmod 0777 ' . escapeshellarg($this->plugins_dir));
             clearstatcache(true, $this->plugins_dir);
         }
 
@@ -100,11 +100,11 @@ class Plugins implements ManageCard {
         }
 
         if (!is_writable($dir)) {
-            @chmod($dir, 0775);
+            @chmod($dir, 0777);
             clearstatcache(true, $dir);
 
             if (!is_writable($dir)) {
-                @exec('sudo chmod 0775 ' . escapeshellarg($dir));
+                @exec('sudo chmod 0777 ' . escapeshellarg($dir));
                 @exec('sudo chown -R pi:pi ' . escapeshellarg($dir));
                 clearstatcache(true, $dir);
             }
@@ -159,7 +159,7 @@ class Plugins implements ManageCard {
             @mkdir($docsDir, 0775, true);
             @exec('sudo mkdir -p ' . escapeshellarg($docsDir));
             @exec('sudo chown -R pi:www-data ' . escapeshellarg($docsDir));
-            @exec('sudo chmod 0775 ' . escapeshellarg($docsDir));
+            @exec('sudo chmod 0777 ' . escapeshellarg($docsDir));
         }
 
         $installed = [];
@@ -181,7 +181,7 @@ class Plugins implements ManageCard {
                 @chown($pyDest, 'pi');
                 @chgrp($pyDest, 'pi');
                 @exec('sudo chown pi:pi ' . escapeshellarg($pyDest));
-                @exec('sudo chmod 0755 ' . escapeshellarg($pyDest));
+                @exec('sudo chmod 0777 ' . escapeshellarg($pyDest));
             }
 
             // 2. Extract paired documentation file if present
@@ -195,8 +195,8 @@ class Plugins implements ManageCard {
                     file_put_contents($docDest, stream_get_contents($docStream));
                     fclose($docStream);
 
-                    @chmod($docDest, 0664);
-                    @exec('sudo chmod 0664 ' . escapeshellarg($docDest));
+                    @chmod($docDest, 0777);
+                    @exec('sudo chmod 0777 ' . escapeshellarg($docDest));
                     @exec('sudo chown pi:www-data ' . escapeshellarg($docDest));
                     $docAdded = true;
                 }
@@ -235,7 +235,7 @@ class Plugins implements ManageCard {
                 return;
             }
 
-            // Handle standalone .py files (preserves original upload behavior)
+            // Handle standalone .py files
             if (substr($rawFilename, -3) !== '.py') {
                 $this->status_msg = 'Error: Only .tvplugin packages, .zip archives, or .py files are permitted.';
                 return;
@@ -249,16 +249,16 @@ class Plugins implements ManageCard {
             }
 
             if (file_exists($dest) && !is_writable($dest)) {
-                @chmod($dest, 0775);
-                @exec('sudo chmod 0775 ' . escapeshellarg($dest));
+                @chmod($dest, 0777);
+                @exec('sudo chmod 0777 ' . escapeshellarg($dest));
             }
 
             if (move_uploaded_file($file['tmp_name'], $dest)) {
-                @chmod($dest, 0755);
+                @chmod($dest, 0777);
                 @chown($dest, 'pi');
                 @chgrp($dest, 'pi');
                 @exec('sudo chown pi:pi ' . escapeshellarg($dest));
-                @exec('sudo chmod 0755 ' . escapeshellarg($dest));
+                @exec('sudo chmod 0777 ' . escapeshellarg($dest));
                 $this->status_msg = 'Successfully installed/updated: ' . htmlspecialchars($rawFilename);
             } else {
                 $this->status_msg = 'Error: Failed to save file to ' . htmlspecialchars($dest);
@@ -279,7 +279,7 @@ class Plugins implements ManageCard {
                 if (substr($filename, -9) === '.disabled') {
                     $newPath = substr($currentPath, 0, -9);
                     if (@rename($currentPath, $newPath)) {
-                        @chmod($newPath, 0755);
+                        @chmod($newPath, 0777);
                         @exec('chmod +x ' . escapeshellarg($newPath));
                     }
                 } elseif (substr($filename, -3) === '.py') {
