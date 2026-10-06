@@ -46,6 +46,62 @@
             gap: 1rem;
         }
 
+        /* On Air Status Indicator Badge */
+        .air-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: monospace;
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            padding: 3px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            user-select: none;
+            transition: all 0.25s ease;
+        }
+
+        .air-status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: currentColor;
+            display: inline-block;
+        }
+
+        /* ON AIR State (Clean Green Signal) */
+        .air-status-badge.is-live {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
+        }
+
+        .air-status-badge.is-live .air-status-dot {
+            box-shadow: 0 0 6px var(--success);
+            animation: air-dot-pulse 2s infinite ease-in-out;
+        }
+
+        /* OFF AIR State (Muted Slate / Inactive) */
+        .air-status-badge.is-off {
+            background: rgba(148, 163, 184, 0.08);
+            color: var(--text-muted);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            box-shadow: none;
+        }
+
+        .air-status-badge.is-off .air-status-dot {
+            opacity: 0.4;
+            animation: none;
+            box-shadow: none;
+        }
+
+        @keyframes air-dot-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.45; }
+        }
+
         #player-container {
             position: fixed;
             bottom: 20px;
@@ -72,7 +128,6 @@
         }
         .btn-play { background-color: #65f89bbb; }
 
-
         #vidplayer { width: 100%; display: block; }
         #counter {
             background: rgba(0,0,0,0.7);
@@ -93,31 +148,29 @@
 
 		.sys-stats {
 			display: flex;
-			flex-wrap: wrap; /* Allows items to stack when they run out of room */
-			gap: 0.75rem 1rem; /* Vertical and horizontal gap */
+			flex-wrap: wrap;
+			gap: 0.75rem 1rem;
 			background: rgba(15, 23, 42, 0.5);
 			padding: 0.5rem 1rem;
 			border-radius: 0.5rem;
 			font-size: 0.75rem;
 			font-family: monospace;
 			border: 1px solid var(--border);
-			justify-content: center; /* Centers items when they stack */
+			justify-content: center;
 		}
 
 		.stat-item { 
 			display: flex; 
 			gap: 0.5rem; 
-			white-space: nowrap; /* Prevents labels from breaking onto two lines */
+			white-space: nowrap;
 		}
 
-		/* Remove the hardcoded left border on mobile for the Uptime item */
 		@media (max-width: 600px) {
 			.uptime-border {
 				border-left: none !important;
 				padding-left: 0 !important;
 			}
 		}
-
 
         .stat-label { color: var(--text-muted); }
 
@@ -131,7 +184,7 @@
         }
 
         .tablinks {
-            flex: 1 0 0px; /* Force equal width distribution */
+            flex: 1 0 0px;
             background: var(--bg-card);
             border: none;
             color: var(--text-main);
@@ -169,7 +222,7 @@
             padding: 0.75rem 1rem;
             font-size: 0.7rem;
             text-transform: uppercase;
-            color: var(--text-main)
+            color: var(--text-main);
             letter-spacing: 0.05em;
         }
         td { padding: 1rem; border-top: 1px solid var(--border); font-size: 0.875rem; }
@@ -227,9 +280,9 @@
 			border-radius: 0.25rem;
 			margin-top: 0.5rem;
 			width: 100%;
-			box-sizing: border-box; /* Ensures padding doesn't push width over 100% */
-			overflow-x: auto;      /* Adds horizontal scrollbar when needed */
-			white-space: nowrap;   /* Prevents text from wrapping to the next line */
+			box-sizing: border-box;
+			overflow-x: auto;
+			white-space: nowrap;
 		}
 
         .table-container {
@@ -240,31 +293,22 @@
         }
     </style>
     <script>
-
 		function fadeAfterDelay(el, seconds) {		
 			if (!el) return;
-
-			// Ensure the element has a transition style
 			el.style.transition = 'opacity 1s ease';
-
-			// Convert seconds to milliseconds for setTimeout
 			setTimeout(() => {
 				el.style.opacity = '0';
-				
-				// Optional: Remove from display after fade finishes (1s)
 				setTimeout(() => {
 					if (el.style.opacity === '0') {
 						el.style.display = 'none';
 						el.style.opacity = 1;
 					}
 				}, 1000);
-				
 			}, seconds * 1000);
 		}
 
 		function prepFlag(id) {
 			const commDiv = document.getElementById(id);
-
 			commDiv.innerHTML = 'loading...';
 			commDiv.style.display = 'block';
 		}		
@@ -273,7 +317,6 @@
 			const [splits, id] = responseText.split('|');
 			const element = document.getElementById(id);
 
-			// Map actions to their corresponding DOM IDs
 			const flagConfig = {
 				'unflag':  ['showAVUnFlagIcon_', 'showAVFlagIcon_'],
 				'flag':    ['showAVFlagIcon_',   'showAVUnFlagIcon_'],
@@ -294,7 +337,6 @@
 				return;
 			}
 
-			// Default behavior for other 'splits' values
 			if (element) {
 				const listItems = splits.trim()
 					.split("\n")
@@ -306,34 +348,18 @@
 			}
 		}
 
-		function flagVideo(vid, id) {
-			ajax("/?flag_video="+vid+"&id="+id, flagCallback);
-		}
-
-		function unflagVideo(vid, id) {
-			ajax("/?unflag_video="+vid+"&id="+id, flagCallback);
-		}
-
-		function flagCommercial(vid, id) {
-			ajax("/?flag_comm="+vid+"&id="+id, flagCallback);
-		}
-
-		function unflagCommercial(vid, id) {
-			ajax("/?unflag_comm="+vid+"&id="+id, flagCallback);
-		}
+		function flagVideo(vid, id) { ajax("/?flag_video="+vid+"&id="+id, flagCallback); }
+		function unflagVideo(vid, id) { ajax("/?unflag_video="+vid+"&id="+id, flagCallback); }
+		function flagCommercial(vid, id) { ajax("/?flag_comm="+vid+"&id="+id, flagCallback); }
+		function unflagCommercial(vid, id) { ajax("/?unflag_comm="+vid+"&id="+id, flagCallback); }
 
 		function renameVideo(fileName) {
 			const toFile = prompt("Rename video file to:", fileName);
-			
-			// Check for null (Cancel) or empty string
 			if (!toFile) return;
-
 			const confirmed = confirm(`Are you sure you want to rename "${fileName}" to "${toFile}"?`);
 			if (!confirmed) return;
 
-			// Use template literals for cleaner URL construction
 			const url = `/?rename_video=${encodeURIComponent(fileName)}&to=${encodeURIComponent(toFile)}`;
-			
 			ajax(url, function(responseText) {
 				alert(responseText.trim());
 			});
@@ -352,16 +378,13 @@
 
 		function viewCommercials(video, showId) {
 			const commDiv = document.getElementById('show' + showId);
-
 			commDiv.innerHTML = 'loading...';
 			commDiv.style.display = 'block';
 
 			const url = `/?get_commercials=${video}&showId=${showId}`;
-
 			ajax(url, function(responseText) {
 				const [commercials, id] = responseText.split('|');
 				const targetDiv = document.getElementById('show' + id);
-				
 				const listItems = commercials.trim()
 					.split("\n")
 					.map(c => `${c}<br />`)
@@ -373,17 +396,14 @@
 
 		function showStats(shortName, id) {
 			const commDiv = document.getElementById('stats' + id);
-
 			commDiv.innerHTML = 'loading...';
 			commDiv.style.display = 'block';
 
 			const url = `/?showstats=${shortName}&id=${id}`;
-
 			ajax(url, function(responseText) {
-				console.log("Stats response:", responseText); // Debug log
+				console.log("Stats response:", responseText);
 				const [commercials, id] = responseText.split('|');
 				const targetDiv = document.getElementById('stats' + id);
-				
 				const listItems = commercials.trim()
 					.split("\n")
 					.map(c => `${c}<br />`)
@@ -400,7 +420,6 @@
 			document.getElementById(tabId).classList.add('active');
 			document.getElementById('btn' + tabId).classList.add('active');
 
-			// Update URL without jumping the page
 			history.pushState(null, null, '#' + tabId);
 		}
 
@@ -410,11 +429,10 @@
 			const video = document.getElementById("vidplayer");
 			container.style.display = "block";
 			video.src = url;
-			console.log("Playing video:", url); // Debug log
+			console.log("Playing video:", url);
 			video.play();
 			startCounter();
 			
-			// Highlight current
 			document.querySelectorAll('.item').forEach(el => el.style.background = "");
 			document.getElementById('row' + id).style.background = "#2e3b2e";
 		}
@@ -425,23 +443,49 @@
 			video.pause();
 			video.src = "";
 			container.style.display = "none";
-
-			// Remove highlight
 			document.querySelectorAll('.item').forEach(el => el.style.background = "");
 		}
 
+        /* Asynchronous Status Check for Modern Template */
+        function updateAirIndicator(isLive) {
+            const badge = document.getElementById("modernAirBadge");
+            const text = document.getElementById("modernAirText");
+            if (!badge || !text) return;
+
+            if (isLive) {
+                badge.classList.remove("is-off");
+                badge.classList.add("is-live");
+                text.textContent = "ON AIR";
+            } else {
+                badge.classList.remove("is-live");
+                badge.classList.add("is-off");
+                text.textContent = "OFF AIR";
+            }
+        }
+
+        async function pollModernAirStatus() {
+            try {
+                const res = await fetch("/?station_status=1", { cache: "no-store" });
+                if (res.ok) {
+                    const data = await res.json();
+                    updateAirIndicator(data.running);
+                }
+            } catch (e) {
+                // Silently bypass transient connection drops
+            }
+        }
+
 		window.addEventListener('DOMContentLoaded', () => {
-    		const hash = window.location.hash.substring(1); // Remove the '#'
+    		const hash = window.location.hash.substring(1);
     		if (hash) {
-				// Optional: Verify the element exists before trying to swap
 				const targetTab = document.getElementById(hash);
 				if (targetTab) {
 					swapTab(hash);
 				}
-    		} else {
-				// Default to showing the first tab if no hash is present
-				//swapTab('Shows');
-			}
+    		}
+
+            // Poll station status every 4 seconds
+            setInterval(pollModernAirStatus, 4000);
 		});
 
 		window.addEventListener('popstate', () => {
@@ -450,15 +494,21 @@
 				swapTab(hash);
 			}
 		});
-
     </script>
 </head>
 <body>
 
     <header>
         <div class="header-container">
-            <div style="font-size: 0.875rem;">
-				<div style="color: var(--text-muted); font-size: 1rem; font-weight: bold; text-transform: uppercase;"><?= $View['nav']['days_links'] ?></div>
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <?php $isBroadcasting = !empty($View['sys']['is_broadcasting']); ?>
+                <span id="modernAirBadge" class="air-status-badge <?= $isBroadcasting ? 'is-live' : 'is-off' ?>">
+                    <span class="air-status-dot"></span>
+                    <span id="modernAirText"><?= $isBroadcasting ? 'ON AIR' : 'OFF AIR' ?></span>
+                </span>
+				<div style="color: var(--text-muted); font-size: 0.95rem; font-weight: bold; text-transform: uppercase;">
+                    <?= $View['nav']['days_links'] ?>
+                </div>
             </div>
 
             <div class="sys-stats">
@@ -512,7 +562,7 @@
 							$showCount++;
                         ?>
                         <tr style="background-color: #<?= $s['color'] ?>5A;">
-                            <td style="font-family: monospace; color: var(--text-main);" valign="top"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
+                            <td style="font-family: monospace; color: var(--text-main);" valign="top"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
                             <td>
                                 <div style="margin-bottom: 0.5rem;"><a href="/?video=<?= $s['url'] ?>"><?= $s['name'] ?></a> <button class="btn btn-play" id="plus<?= $showCount ?>" onclick="playVideo('/?video=<?= $s['url'] ?>', <?= $showCount ?>)">▶</button></div>
                                 <div style="font-size: 0.75rem; color: var(--text-muted);"><span class="type-badge" style="background-color: #FFFFFF88; color:#000; text-shadow: -1px -1px 0 #bbb, 1px -1px 0 #bbb, -1px  1px 0 #bbb, 1px  1px 0 #bbb;"><?= $s['len'] ?></span> <span class="type-badge" style="background-color: #<?= $s['color'] ?>; text-shadow: -1px -1px 0 #888, 1px -1px 0 #888, -1px  1px 0 #888, 1px  1px 0 #888;"><?= $s['type'] ?></span></div>
@@ -530,192 +580,184 @@
             </div>
         </section>
 
-    <!-- Commercials -->
-    <div id="Commercials" class="tabcontent">
-      <div class="table-container">
-          <table>
-            <thead>
-                <tr><th>Time</th><th>Category</th><th>Asset Name</th><th>Manage</th></tr>
-            </thead>
-            <tbody>
-                <?php
-					$count = 0;	
-					foreach ($View['data']['commercials'] as $s):
-						$count++;
-				?>
-                <tr class="comm-row" style="background-color: #<?= $s['color'] ?>5A;">
-                    <td align="center" style="font-family: monospace; padding:0px 0px 0px 10px;"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
-                    <td align="center"><span style="font-size: 0.75rem; font-weight: bold; padding:0px;"><?= $s['typeLabel'] ?></span></td>
-                    <td style="padding-left:20px;">
-                        <?= $count ?>. &#x<?= $s['emoji'] ?>; 
-                        <a href="/?video=<?= $s['videoUrl'] ?>" style="color:white; font-weight: 600;"><?= $s['filename'] ?></a> <button class="btn btn-play" id="plus<?= $showCount ?>" onclick="playVideo('/?video=<?= $s['videoUrl'] ?>', <?= $count ?>)">▶</button></div>
-                        <span style="font-size: 0.75rem; opacity: 0.8;">(<?= $s['length'] ?>)</span>
-                    </td>
-                    <td>
-                        <div style="display: flex; gap: 8px;">
-                            <a href="/videoeditor.php?file=<?= $s['videoUrl'] ?>" title="Edit"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></a> 
-                            <a href="/?delete=<?= $s['videoUrl'] ?>" onclick="return confirm('Deleting video is permanent.\n\nAre you sure?')" title="Delete"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="2" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></a>
-							<a id="commAVFlagIcon_<?= $count ?>" onclick="flagCommercial(<?= $s['id'] ?>, <?= $count ?>)" <?php if($s['flag'] == 1) { echo 'style="display: none;"'; } ?> ><svg id="commVFlagIcon_<?= $count ?>" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="green" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg></a>
-                            <a id="commAVUnFlagIcon_<?= $count ?>" onclick="unflagCommercial(<?= $s['id'] ?>, <?= $count ?>)" <?php if($s['flag'] == 0) { echo 'style="display: none;"'; } ?> ><svg id="commVUnFlagIcon_<?= $count ?>" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line><line x1="2" y1="2" x2="22" y2="22" opacity="0.9"></line></svg></a>
-                        </div>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-          </table>
-      </div>
-    </div>
+        <!-- Commercials -->
+        <div id="Commercials" class="tabcontent">
+          <div class="table-container">
+              <table>
+                <thead>
+                    <tr><th>Time</th><th>Category</th><th>Asset Name</th><th>Manage</th></tr>
+                </thead>
+                <tbody>
+                    <?php
+						$count = 0;	
+						foreach ($View['data']['commercials'] as $s):
+							$count++;
+					?>
+                    <tr class="comm-row" style="background-color: #<?= $s['color'] ?>5A;">
+                        <td align="center" style="font-family: monospace; padding:0px 0px 0px 10px;"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
+                        <td align="center"><span style="font-size: 0.75rem; font-weight: bold; padding:0px;"><?= $s['typeLabel'] ?></span></td>
+                        <td style="padding-left:20px;">
+                            <?= $count ?>. &#x<?= $s['emoji'] ?>; 
+                            <a href="/?video=<?= $s['videoUrl'] ?>" style="color:white; font-weight: 600;"><?= $s['filename'] ?></a> <button class="btn btn-play" id="plus<?= $showCount ?>" onclick="playVideo('/?video=<?= $s['videoUrl'] ?>', <?= $count ?>)">▶</button></div>
+                            <span style="font-size: 0.75rem; opacity: 0.8;">(<?= $s['length'] ?>)</span>
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 8px;">
+                                <a href="/videoeditor.php?file=<?= $s['videoUrl'] ?>" title="Edit"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></a> 
+                                <a href="/?delete=<?= $s['videoUrl'] ?>" onclick="return confirm('Deleting video is permanent.\n\nAre you sure?')" title="Delete"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="2" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></a>
+								<a id="commAVFlagIcon_<?= $count ?>" onclick="flagCommercial(<?= $s['id'] ?>, <?= $count ?>)" <?php if($s['flag'] == 1) { echo 'style="display: none;"'; } ?> ><svg id="commVFlagIcon_<?= $count ?>" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="green" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg></a>
+                                <a id="commAVUnFlagIcon_<?= $count ?>" onclick="unflagCommercial(<?= $s['id'] ?>, <?= $count ?>)" <?php if($s['flag'] == 0) { echo 'style="display: none;"'; } ?> ><svg id="commVUnFlagIcon_<?= $count ?>" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="red" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="filter: drop-shadow(0 0 1px black) drop-shadow(0 0 1px black);"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line><line x1="2" y1="2" x2="22" y2="22" opacity="0.9"></line></svg></a>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+              </table>
+          </div>
+        </div>
 
         <!-- Messages -->
-<section id="Messages" class="tabcontent">
-    <div style="margin-top: 1rem;">
-        <?php
-            $lastDate = null; 
-            foreach ($View['data']['messages'] as $m):
-                // Extract "03/16/26" from "03/16/26 03:02:55 AM"
-                $currentDate = date("m/d/y", $m["timestamp"]);
+        <section id="Messages" class="tabcontent">
+            <div style="margin-top: 1rem;">
+                <?php
+                    $lastDate = null; 
+                    foreach ($View['data']['messages'] as $m):
+                        $currentDate = date("m/d/y", $m["timestamp"]);
 
-                if ($lastDate !== $currentDate):
-        ?>
-                    <div style="text-align: center; margin: 2rem 0 1rem; position: relative;">
-                        <hr style="border: 0; border-top: 1px solid var(--text-muted); opacity: 0.2;">
-                        <span style="position: absolute; top: -0.6rem; left: 50%; transform: translateX(-50%); background: var(--bg-body); padding: 0 1rem; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; text-transform: uppercase;">
-                            <?= $currentDate ?>
-                        </span>
-                    </div>
-        <?php 
-                    $lastDate = $currentDate;
-                endif; 
-        ?>
-        
-        <div style="background: var(--bg-card); padding: 1rem; border-radius: 0.5rem; border-left: 4px solid var(--accent); margin-bottom: 1rem;">
-            <div style="font-size: 0.75rem; color: var(--accent); font-weight: bold;"><?= date("m/d/y h:i:s A", $m["timestamp"]) ?></div>
-            <div style="font-weight: bold; margin: 0.25rem 0;"><?= $m['header'] ?></div>
-            <ul style="padding-left: 1.25rem; color: var(--text-muted); font-size: 0.875rem;">
-                <?php foreach ($m['details'] as $d): ?><li><?php
-				if(substr($d,0, 6) == "ALERT!") {
-					$d = "<span style='color:red; font-weight:bold;'>".$d."</span>";
-				}
-				echo $d;
-				?></li><?php endforeach; ?>
-            </ul>
-        </div>
-        <?php endforeach; ?>
-    </div>
-</section>
+                        if ($lastDate !== $currentDate):
+                ?>
+                            <div style="text-align: center; margin: 2rem 0 1rem; position: relative;">
+                                <hr style="border: 0; border-top: 1px solid var(--text-muted); opacity: 0.2;">
+                                <span style="position: absolute; top: -0.6rem; left: 50%; transform: translateX(-50%); background: var(--bg-main); padding: 0 1rem; font-size: 0.75rem; color: var(--text-muted); font-weight: bold; text-transform: uppercase;">
+                                    <?= $currentDate ?>
+                                </span>
+                            </div>
+                <?php 
+                            $lastDate = $currentDate;
+                        endif; 
+                ?>
+                
+                <div style="background: var(--bg-card); padding: 1rem; border-radius: 0.5rem; border-left: 4px solid var(--accent); margin-bottom: 1rem;">
+                    <div style="font-size: 0.75rem; color: var(--accent); font-weight: bold;"><?= date("m/d/y h:i:s A", $m["timestamp"]) ?></div>
+                    <div style="font-weight: bold; margin: 0.25rem 0;"><?= $m['header'] ?></div>
+                    <ul style="padding-left: 1.25rem; color: var(--text-muted); font-size: 0.875rem;">
+                        <?php foreach ($m['details'] as $d): ?><li><?php
+						if(substr($d,0, 6) == "ALERT!") {
+							$d = "<span style='color:red; font-weight:bold;'>".$d."</span>";
+						}
+						echo $d;
+						?></li><?php endforeach; ?>
+                    </ul>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </section>
 
         <!-- Manage -->
         <section id="Manage" class="tabcontent">
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+                <?php if (empty($View['data']['manage']['cards'])): ?>
+                    <div class="card-table-wrapper">
+                        <h3 style="padding: 1rem; border-bottom: 1px solid var(--border); font-size: 1rem;">Manage Cards</h3>
+                        <div style="padding: 1rem; color: var(--text-muted); text-align: center;">
+                            <b>No cards to show.</b><br />
+                            <span style="color:red;">Add some to the /manage/ directory to see them here.</span>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <?php foreach ($View['data']['manage']['cards'] as $cards): ?>
+                    <div class="card-table-wrapper">
+                        <h3 style="padding: 1rem; border-bottom: 1px solid var(--border); font-size: 1rem;"><?= $cards['name'] ?></h3>
+                        <?php if (!empty($cards['links'])): ?>
+                            <?php
+                            $count = 0;
+                            $clean_id = preg_replace('/[^a-zA-Z0-9]/', '', $cards['name']);
+                            $opened_extra = false;
+                            ?>
+                            <ul style="list-style: none;">
+                            <?php foreach ($cards['links'] as $link): ?>
+                                <?php
+                                if ($count == 5) {
+                                    echo '</ul>';
+                                    echo '<button class="btn" style="margin: 5px 0 5px 20px;" onclick="document.getElementById(\'' . $clean_id . '-extra-links\').style.display = \'block\'; this.style.display = \'none\';">Show More Links</button>';
+                                    echo '<div style="display:none;" id="' . $clean_id . '-extra-links">';
+                                    echo '<ul style="list-style-type: square; padding-left: 20px; margin-top: 0;">';
+                                    $opened_extra = true;
+                                }
 
-		<!-- Dynamic Cards -->
-		<?php if (empty($View['data']['manage']['cards'])): ?>
-			<div class="card-table-wrapper">
-            <h3 style="padding: 1rem; border-bottom: 1px solid var(--border); font-size: 1rem;">Manage Cards</h3>
-            <div style="padding: 1rem; color: var(--text-muted); text-align: center;">
-				<b>No cards to show.</b><br />
-				<span style="color:red;">Add some to the /manage/ directory to see them here.</span>
+                                $style = !empty($link['style']) ? ' style="' . $link['style'] . '"' : '';
+                                $target = !empty($link['target']) ? ' target="' . $link['target'] . '"' : '';
+                                $action = !empty($link['action']) ? ' onclick="' . $link['action'] . '"' : '';
+
+                                if (isset($link['url']) && isset($link['label'])) {
+                                    echo '<li style="padding: 0.75rem 1rem;"><a href="' . $link['url'] . '"' . $style . $target . $action . '>' . $link['label'] . '</a></li>';
+                                    $count++;
+                                }
+                                ?>
+                            <?php endforeach; ?>
+                            </ul>
+                            <?php if ($opened_extra): ?>
+                                </div>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                        <?php if (!empty($cards['html'])): ?>
+                            <?= $cards['html'] ?>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
-        </div>
-		<?php else: ?>
-		
-			<?php foreach ($View['data']['manage']['cards'] as $cards): ?>
-			<div class="card-table-wrapper">
-				<h3 style="padding: 1rem; border-bottom: 1px solid var(--border); font-size: 1rem;"><?= $cards['name'] ?></h3>
-				<?php if (!empty($cards['links'])): ?>
-								<?php
-								$count = 0;
-								$clean_id = preg_replace('/[^a-zA-Z0-9]/', '', $cards['name']);
-								$opened_extra = false;
-								?>
-								<ul style="list-style: none;">
-								<?php foreach ($cards['links'] as $link): ?>
-									<?php
-									if ($count == 5) {
-										// Close the first <ul> cleanly
-										echo '</ul>';
-										// Output the button and the hidden wrapper container
-										echo '<button class="btn" style="margin: 5px 0 5px 20px;" onclick="document.getElementById(\'' . $clean_id . '-extra-links\').style.display = \'block\'; this.style.display = \'none\';">Show More Links</button>';
-										echo '<div style="display:none;" id="' . $clean_id . '-extra-links">';
-										// Start a new valid <ul> inside the hidden div
-										echo '<ul style="list-style-type: square; padding-left: 20px; margin-top: 0;">';
-										$opened_extra = true;
-									}
 
-									$style = !empty($link['style']) ? ' style="' . $link['style'] . '"' : '';
-									$target = !empty($link['target']) ? ' target="' . $link['target'] . '"' : '';
-									$action = !empty($link['action']) ? ' onclick="' . $link['action'] . '"' : '';
+            <h3 style="margin-bottom: 1rem;">Flagged Videos</h3>
+            <div class="card-table-wrapper" style="margin-bottom: 2rem;">
+                <table>
+                    <tbody>
+                        <?php if (empty($View['data']['flagged_videos'])): ?>
+                            <tr><td style="text-align: center; color: var(--text-muted);">Nothing to see here</td></tr>
+                        <?php else: ?>
+                            <?php 
+                                $count = 0;
+                                foreach ($View['data']['flagged_videos'] as $v):
+                                    $count++;
+                            ?>
+                            <tr id="manVid_<?= $count ?>">
+                                <td><a href="/?video=<?= urlencode($v['name']) ?>" target="_blank"><?= $v['name'] ?></a></td>
+                                <td style="text-align: right; display: flex; gap: 8px; justify-content: flex-end;">
+                                    <button class="type-badge" style="cursor: pointer; border: none;" onclick="unflagVideo(<?= $v['id'] ?>, 'manVid_<?= $count ?>');">unflag</button>
+                                    <button class="type-badge" style="cursor: pointer; border: none; background: var(--accent);" onclick="renameVideo('<?= $v['name'] ?>');">rename</button>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
 
-									if (isset($link['url']) && isset($link['label'])) {
-										echo '<li style="padding: 0.75rem 1rem;"><a href="' . $link['url'] . '"' . $style . $target . $action . '>' . $link['label'] . '</a></li>';
-										$count++;
-									}
-									?>
-								<?php endforeach; ?>
-								</ul>
-								<?php if ($opened_extra): ?>
-									</div>
-								<?php endif; ?>
-							<?php endif; ?>
-				<?php if (!empty($cards['html'])): ?>
-					<?= $cards['html'] ?>
-				<?php endif; ?>
-			</div>
-			<?php endforeach; ?>
-		<?php endif; ?>
-		<!-- End Dynamic Cards -->
-    </div>
-
-    <h3 style="margin-bottom: 1rem;">Flagged Videos</h3>
-    <div class="card-table-wrapper" style="margin-bottom: 2rem;">
-        <table>
-            <tbody>
-                <?php if (empty($View['data']['flagged_videos'])): ?>
-                    <tr><td style="text-align: center; color: var(--text-muted);">Nothing to see here</td></tr>
-                <?php else: ?>
-                    <?php 
-						$count = 0;
-						foreach ($View['data']['flagged_videos'] as $v):
-							$count++;
-					?>
-                    <tr id="manVid_<?= $count ?>">
-                        <td><a href="/?video=<?= urlencode($v['name']) ?>" target="_blank"><?= $v['name'] ?></a></td>
-                        <td style="text-align: right; display: flex; gap: 8px; justify-content: flex-end;">
-                            <button class="type-badge" style="cursor: pointer; border: none;" onclick="unflagVideo(<?= $v['id'] ?>, 'manVid_<?= $count ?>');">unflag</button>
-                            <button class="type-badge" style="cursor: pointer; border: none; background: var(--accent);" onclick="renameVideo('<?= $v['name'] ?>');">rename</button>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </tbody>
-        </table>
-    </div>
-
-    <h3 style="margin-bottom: 1rem;">Flagged Commercials</h3>
-    <div class="card-table-wrapper">
-        <table>
-            <tbody>
-                <?php if (empty($View['data']['flagged_comms'])): ?>
-                    <tr><td style="text-align: center; color: var(--text-muted);">Nothing to see here</td></tr>
-                <?php else: ?>
-                    <?php 
-						$count = 0;
-						foreach ($View['data']['flagged_comms'] as $v):
-							$count++;
-					 ?>
-                    <tr id="manComm_<?= $count ?>">
-                        <td><a href="/?video=<?= urlencode($v['name']) ?>" target="_blank"><?= $v['name'] ?></a></td>
-                        <td style="text-align: right; display: flex; gap: 8px; justify-content: flex-end;">
-                            <button class="type-badge" style="cursor: pointer; border: none;" onclick="unflagVideo(<?= $v['id'] ?>, 'manComm_<?= $count ?>');">unflag</button>
-                            <button class="type-badge" style="cursor: pointer; border: none; background: var(--accent);" onclick="renameVideo('<?= $v['name'] ?>');">rename</button>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </tbody>
-        </table>
-    </div>
-</section>
+            <h3 style="margin-bottom: 1rem;">Flagged Commercials</h3>
+            <div class="card-table-wrapper">
+                <table>
+                    <tbody>
+                        <?php if (empty($View['data']['flagged_comms'])): ?>
+                            <tr><td style="text-align: center; color: var(--text-muted);">Nothing to see here</td></tr>
+                        <?php else: ?>
+                            <?php 
+                                $count = 0;
+                                foreach ($View['data']['flagged_comms'] as $v):
+                                    $count++;
+                            ?>
+                            <tr id="manComm_<?= $count ?>">
+                                <td><a href="/?video=<?= urlencode($v['name']) ?>" target="_blank"><?= $v['name'] ?></a></td>
+                                <td style="text-align: right; display: flex; gap: 8px; justify-content: flex-end;">
+                                    <button class="type-badge" style="cursor: pointer; border: none;" onclick="unflagVideo(<?= $v['id'] ?>, 'manComm_<?= $count ?>');">unflag</button>
+                                    <button class="type-badge" style="cursor: pointer; border: none; background: var(--accent);" onclick="renameVideo('<?= $v['name'] ?>');">rename</button>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
         <!-- Stats -->
         <section id="Stats" class="tabcontent">
@@ -730,10 +772,10 @@
                     </thead>
                     <tbody>
                         <?php 
-						$count = 0;
-						foreach ($View['data']['stats'] as $s) {
-							$count++;
-						 ?>
+                        $count = 0;
+                        foreach ($View['data']['stats'] as $s) {
+                            $count++;
+                        ?>
                         <tr style="background: #<?= $s['color'] ?>5A;">
                             <td>
                                 <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -751,8 +793,8 @@
                             <td style="text-align: center; font-weight: bold; color: var(--accent);"><?= $s['occurrence'] ?></td>
                         </tr>
                         <?php 
-							}
-						?>
+                        }
+                        ?>
                     </tbody>
                 </table>
             </div>
