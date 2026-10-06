@@ -2,7 +2,7 @@ version:1
 date:2026/10/05
 
 # clean up old/deprecated files
-#remove:/home/pi/Desktop/_rnd80s.py
+remove:/home/pi/Desktop/_rnd80s.py
 
 # main script
 sync:_station.py->/home/pi/Desktop/_station.py
@@ -23,7 +23,7 @@ sync:webui/picker.php->/var/www/html/picker.php
 sync:webui/restart.sh->/var/www/html/restart.sh
 sync:webui/scheduler.php->/var/www/html/scheduler.php
 sync:webui/scheduler_backend.php->/var/www/html/scheduler_backend.php
-sync:webui/settings-doc.html->/var/www/html/settings-doc.html
+sync:webui/docs/settings.html->/var/www/html/docs/settings.html
 sync:webui/settings.class.inc->/var/www/html/settings.class.inc
 sync:webui/settings.php->/var/www/html/settings.php
 sync:webui/test_settings.php->/var/www/html/test_settings.php
@@ -40,11 +40,20 @@ sync:webui/manage/Programming.php->/var/www/html/manage/Programming.php
 sync:webui/manage/SystemUpdater.php->/var/www/html/manage/SystemUpdater.php
 sync:webui/manage/ThemeManager.php->/var/www/html/manage/ThemeManager.php
 
-sync:webui/templates/modern.php->/var/www/html/templates/modern.php
-sync:webui/templates/modern.preview.png->/var/www/html/templates/modern.preview.png
-ifsync:webui/templates/windows.php->/var/www/html/templates/windows.php
-ifsync:webui/templates/windows.preview.png->/var/www/html/templates/windows.preview.png
+sync:webui/templates/source/modern/modern.php->/var/www/html/templates/modern.php
+sync:webui/templates/source/modern/modern.preview.png->/var/www/html/templates/modern.preview.png
 
+# Optional Template Themes Updates
+ifsync:webui/templates/source/windows/windows.php->/var/www/html/templates/windows.php
+ifsync:webui/templates/source/windows/windows.preview.png->/var/www/html/templates/windows.preview.png
+
+# Option Plugin Updates
+ifsync:plugins/source/pip/picture-in-picture.py->/home/pi/Desktop/plugins/picture-in-picture.py
+ifsync:plugins/source/pip/picture-in-picture.plugin.html->/var/www/html/docs/picture-in-picture.plugin.html
+ifsync:plugins/source/radio/radio.plugin.html->/home/pi/Desktop/plugins/radio.py
+ifsync:plugins/source/radio/radio.py->/var/www/html/docs/radio.plugin.html
+
+# Setup wizard files
 sync:webui/setup/complete.php->/var/www/html/setup/complete.php
 sync:webui/setup/index.php->/var/www/html/setup/index.php
 sync:webui/setup/reboot_helper.php->/var/www/html/setup/reboot_helper.php
