@@ -81,6 +81,52 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* Win9x Inset On-Air Tally Badge */
+        .win-air-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-top: 1px solid var(--win-border-middark);
+            border-left: 1px solid var(--win-border-middark);
+            border-right: 1px solid var(--win-border-light);
+            border-bottom: 1px solid var(--win-border-light);
+            background: var(--win-bg);
+            padding: 2px 7px;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: bold;
+            letter-spacing: 0.05em;
+            user-select: none;
+        }
+
+        .win-air-led {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            border: 1px solid #000;
+            display: inline-block;
+        }
+
+        /* ON AIR (Active Green LED) */
+        .win-air-badge.is-live .win-air-led {
+            background-color: #00ff00;
+            box-shadow: 0 0 4px #00ff00;
+        }
+        .win-air-badge.is-live {
+            color: #000000;
+        }
+
+        /* OFF AIR (Dark / Inactive LED) */
+        .win-air-badge.is-off .win-air-led {
+            background-color: #555555;
+            box-shadow: none;
+        }
+        .win-air-badge.is-off {
+            color: #555555;
         }
 
         /* Generic Buttons */
@@ -134,7 +180,7 @@
             margin: 10px 6px 0 6px;
             display: flex;
             position: relative;
-            z-index: 9`;
+            z-index: 9;
         }
 
         .tablinks {
@@ -269,7 +315,6 @@
         }
     </style>
     <script>
-
 		function fadeAfterDelay(el, seconds) {		
 			if (!el) return;
 			setTimeout(() => {
@@ -318,32 +363,19 @@
 			}
 		}
 
-		function flagVideo(vid, id) {
-			ajax("/?flag_video="+vid+"&id="+id, flagCallback);
-		}
-
-		function unflagVideo(vid, id) {
-			ajax("/?unflag_video="+vid+"&id="+id, flagCallback);
-		}
-
-		function flagCommercial(vid, id) {
-			ajax("/?flag_comm="+vid+"&id="+id, flagCallback);
-		}
-
-		function unflagCommercial(vid, id) {
-			ajax("/?unflag_comm="+vid+"&id="+id, flagCallback);
-		}
+		function flagVideo(vid, id) { ajax("/?flag_video="+vid+"&id="+id, flagCallback); }
+		function unflagVideo(vid, id) { ajax("/?unflag_video="+vid+"&id="+id, flagCallback); }
+		function flagCommercial(vid, id) { ajax("/?flag_comm="+vid+"&id="+id, flagCallback); }
+		function unflagCommercial(vid, id) { ajax("/?unflag_comm="+vid+"&id="+id, flagCallback); }
 
 		function renameVideo(fileName) {
 			const toFile = prompt("Rename video file to:", fileName);
-			
 			if (!toFile) return;
 
 			const confirmed = confirm(`Are you sure you want to rename "${fileName}" to "${toFile}"?`);
 			if (!confirmed) return;
 
 			const url = `/?rename_video=${encodeURIComponent(fileName)}&to=${encodeURIComponent(toFile)}`;
-			
 			ajax(url, function(responseText) {
 				alert(responseText.trim());
 			});
@@ -362,16 +394,13 @@
 
 		function viewCommercials(video, showId) {
 			const commDiv = document.getElementById('show' + showId);
-
 			commDiv.innerHTML = 'loading...';
 			commDiv.style.display = 'block';
 
 			const url = `/?get_commercials=${video}&showId=${showId}`;
-
 			ajax(url, function(responseText) {
 				const [commercials, id] = responseText.split('|');
 				const targetDiv = document.getElementById('show' + id);
-				
 				const listItems = commercials.trim()
 					.split("\n")
 					.map(c => `${c}<br />`)
@@ -383,17 +412,14 @@
 
 		function showStats(shortName, id) {
 			const commDiv = document.getElementById('stats' + id);
-
 			commDiv.innerHTML = 'loading...';
 			commDiv.style.display = 'block';
 
 			const url = `/?showstats=${shortName}&id=${id}`;
-
 			ajax(url, function(responseText) {
 				console.log("Stats response:", responseText);
 				const [commercials, id] = responseText.split('|');
 				const targetDiv = document.getElementById('stats' + id);
-				
 				const listItems = commercials.trim()
 					.split("\n")
 					.map(c => `${c}<br />`)
@@ -422,12 +448,10 @@
 			console.log("Playing video:", url);
 			video.play();
 			
-			// Try calling startCounter if it exists globally
             if (typeof startCounter === "function") {
                 startCounter();
             }
 			
-			// Highlight current with classic Windows selection color
 			document.querySelectorAll('tr').forEach(el => {
                 if(el.dataset.bg) el.style.background = el.dataset.bg;
                 el.style.color = "";
@@ -450,13 +474,41 @@
 			video.src = "";
 			container.style.display = "none";
 
-			// Remove highlight
 			document.querySelectorAll('tr').forEach(el => {
                 if(el.dataset.bg) el.style.background = el.dataset.bg;
                 el.style.color = "";
                 Array.from(el.getElementsByTagName('a')).forEach(a => a.style.color = "");
             });
 		}
+
+        /* Asynchronous Status Check for Win9X Theme */
+        function updateWinAirBadge(isRunning) {
+            const badge = document.getElementById("winAirBadge");
+            const text  = document.getElementById("winAirText");
+            if (!badge || !text) return;
+
+            if (isRunning) {
+                badge.classList.remove("is-off");
+                badge.classList.add("is-live");
+                text.textContent = "TRUE";
+            } else {
+                badge.classList.remove("is-live");
+                badge.classList.add("is-off");
+                text.textContent = "FALSE";
+            }
+        }
+
+        async function pollWinAirStatus() {
+            try {
+                const res = await fetch("/?station_status=1", { cache: "no-store" });
+                if (res.ok) {
+                    const data = await res.json();
+                    updateWinAirBadge(data.running);
+                }
+            } catch (e) {
+                // Silently bypass transient connection drops
+            }
+        }
 
 		window.addEventListener('DOMContentLoaded', () => {
     		const hash = window.location.hash.substring(1);
@@ -466,6 +518,9 @@
 					swapTab(hash);
 				}
     		}
+
+            // Poll station status every 4 seconds
+            setInterval(pollWinAirStatus, 4000);
 		});
 
 		window.addEventListener('popstate', () => {
@@ -474,7 +529,6 @@
 				swapTab(hash);
 			}
 		});
-
     </script>
 </head>
 <body>
@@ -490,8 +544,10 @@
 
         <header>
             <div class="toolbar">
-                <div>
-                    <?= $View['nav']['days_links'] ?>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div>
+                        <?= $View['nav']['days_links'] ?>
+                    </div>
                 </div>
 
                 <a href="/?skip=1" class="btn-skip">
@@ -527,7 +583,7 @@
                                 $showCount++;
                             ?>
                             <tr id="row<?= $showCount ?>" style="background-color: #<?= $s['color'] ?>5A;">
-                                <td style="font-family: monospace;" valign="top"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
+                                <td style="font-family: monospace;" valign="top"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
                                 <td>
                                     <div style="margin-bottom: 2px;"><a href="/?video=<?= $s['url'] ?>"><?= $s['name'] ?></a> <button class="btn btn-play" id="plus<?= $showCount ?>" onclick="playVideo('/?video=<?= $s['url'] ?>', <?= $showCount ?>)">▶</button></div>
                                     <div><span class="type-badge"><?= $s['len'] ?></span> <span class="type-badge"><?= $s['type'] ?></span></div>
@@ -559,7 +615,7 @@
                                 $count++;
                         ?>
                         <tr class="comm-row" id="rowComm<?= $count ?>" style="background-color: #<?= $s['color'] ?>5A;">
-                            <td align="center" style="font-family: monospace; padding-left:10px;"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
+                            <td align="center" style="font-family: monospace; padding-left:10px;"><?= date("h:i\<\s\m\a\l\l\>:s\<\/\s\m\a\l\l\> A",$s['timestamp']) ?></td>
                             <td align="center"><strong><?= $s['typeLabel'] ?></strong></td>
                             <td style="padding-left:20px;">
                                 <?= $s['monthPrefix'] ?>. &#x<?= $s['emoji'] ?>; 
@@ -638,12 +694,9 @@
 								<?php foreach ($cards['links'] as $link): ?>
 									<?php
 									if ($count == 5) {
-										// Close the first <ul> cleanly
 										echo '</ul>';
-										// Output the button and the hidden wrapper container
 										echo '<button class="btn" style="margin: 5px 0 5px 20px;" onclick="document.getElementById(\'' . $clean_id . '-extra-links\').style.display = \'block\'; this.style.display = \'none\';">Show More Links</button>';
 										echo '<div style="display:none;" id="' . $clean_id . '-extra-links">';
-										// Start a new valid <ul> inside the hidden div
 										echo '<ul style="list-style-type: square; padding-left: 20px; margin-top: 0;">';
 										$opened_extra = true;
 									}
@@ -767,8 +820,9 @@
                 </div>
             </section>
         </main>
-
+<?php $isBroadcasting = !empty($View['sys']['is_broadcasting']); ?>
         <div class="status-bar">
+			<div class="status-item">ON AIR: <span id="winAirText"><?= $isBroadcasting ? 'TRUE' : 'FALSE' ?></span></div>
             <div class="status-item">Disk: <?= implode(" | ", $View['sys']['disk']) ?></div>
             <div class="status-item" style="color: <?= $View['sys']['load'] > 80 ? 'red' : 'inherit' ?>">Load: <?= $View['sys']['load'] ?>%</div>
             <div class="status-item">Temp: <?= $View['sys']['temp_f'] ?>°F</div>
