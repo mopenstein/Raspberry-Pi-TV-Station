@@ -31,6 +31,8 @@ sync:webui/videoeditor.php->/var/www/html/videoeditor.php
 sync:webui/videostream.inc->/var/www/html/videostream.inc
 sync:webui/youtube-dl.php->/var/www/html/youtube-dl.php
 
+# Manage cards
+sync:webui/manage/StationControl.php->/var/www/html/manage/StationControl.php
 sync:webui/manage/Channels.php->/var/www/html/manage/Channels.php
 sync:webui/manage/Database.php->/var/www/html/manage/Database.php
 sync:webui/manage/FilesSystem.php->/var/www/html/manage/FilesSystem.php
