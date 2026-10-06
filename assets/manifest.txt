@@ -42,12 +42,17 @@ sync:webui/manage/Programming.php->/var/www/html/manage/Programming.php
 sync:webui/manage/SystemUpdater.php->/var/www/html/manage/SystemUpdater.php
 sync:webui/manage/ThemeManager.php->/var/www/html/manage/ThemeManager.php
 
+# Default Template Theme
 sync:webui/templates/source/modern/modern.php->/var/www/html/templates/modern.php
 sync:webui/templates/source/modern/modern.preview.png->/var/www/html/templates/modern.preview.png
 
 # Optional Template Themes Updates
 ifsync:webui/templates/source/windows/windows.php->/var/www/html/templates/windows.php
 ifsync:webui/templates/source/windows/windows.preview.png->/var/www/html/templates/windows.preview.png
+ifsync:webui/templates/source/windows/broadcast.php->/var/www/html/templates/broadcast.php
+ifsync:webui/templates/source/windows/broadcast.preview.png->/var/www/html/templates/broadcast.preview.png
+ifsync:webui/templates/source/windows/niteowl.php->/var/www/html/templates/niteowl.php
+ifsync:webui/templates/source/windows/niteowl.preview.png->/var/www/html/templates/niteowl.preview.png
 
 # Option Plugin Updates
 ifsync:plugins/source/pip/picture-in-picture.py->/home/pi/Desktop/plugins/picture-in-picture.py
