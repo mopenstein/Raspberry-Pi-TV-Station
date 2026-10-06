@@ -44,7 +44,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
 
     TARGET=""
-    if [[ "$line" =~ ^(sync|update|create): ]]; then
+	if [[ "$line" =~ ^(sync|update|create|ifsync): ]]; then
         PAYLOAD="${line#*:}"
         TARGET="${PAYLOAD##*->}"
     elif [[ "$line" =~ ^remove: ]]; then
@@ -112,10 +112,17 @@ while IFS= read -r line || [ -n "$line" ]; do
     fi
 
     # 2. Handle file sync/downloads with hash/byte check and permission preservation
-    if [[ "$line" =~ ^sync: ]] || [[ "$line" =~ ^update: ]] || [[ "$line" =~ ^create: ]]; then
+    if [[ "$line" =~ ^sync: ]] || [[ "$line" =~ ^update: ]] || [[ "$line" =~ ^create: ]] || [[ "$line" =~ ^ifsync: ]]; then
+        ACTION="${line%%:*}"
         PAYLOAD="${line#*:}"
         REMOTE_SRC="${PAYLOAD%%->*}"
         LOCAL_DEST="${PAYLOAD##*->}"
+
+        # If conditional sync, skip immediately if file does not exist locally
+        if [ "$ACTION" = "ifsync" ] && [ ! -e "$LOCAL_DEST" ]; then
+            echo "Skipping optional (not installed): $LOCAL_DEST"
+            continue
+        fi
 
         # Block the updater from modifying or replacing itself
         if [ "$(readlink -f "$LOCAL_DEST" 2>/dev/null)" = "$(readlink -f "$0")" ] || [[ "$LOCAL_DEST" == *"update_station.sh" ]]; then

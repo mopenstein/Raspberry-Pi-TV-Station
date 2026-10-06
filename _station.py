@@ -16,15 +16,10 @@
 # 		Opening it up to the web will ruin your day.											 #
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
 
-
-
-import ast
-
 from omxplayer import OMXPlayer # the video player
 from time import sleep			# used to give time for the player to load the video file
 import math						# math functions
 import os						# for path directory access
-import glob						# how we quickly get all files in a directory
 import random					# choosing random stuff
 import time						# time functions
 import datetime					# date and time, used for testing purposes
@@ -37,9 +32,6 @@ import subprocess				# for rebooting the machine
 import traceback				# for error reporting
 import hashlib					# for generating hash IDs
 import ast						# for safely evaluating mathematical expressions
-import shutil					# for file operations
-
-from datetime import date, timedelta
 
 # begin python 2/3 compatibility
 try:
@@ -204,29 +196,35 @@ def load_plugins(plugin_dir):
 				print("Failed to load", name, "-", str(e))
 				report_error("PLUGIN_LOAD", [name, str(e), traceback.format_exc()])
 
-
 def wait_for_plugins(plugin_dir, timeout=30):
 	"""
-	Waits for plugins to be loaded from the specified directory, checking periodically until plugins are found or a timeout is reached.
+	Waits for plugins to be loaded from the specified directory.
+	- If directory does not exist: returns False.
+	- If directory exists and is empty: returns True silently.
+	- If plugins exist: waits for PLUGINS to populate, returns True on success or False on timeout.
 
 	:param plugin_dir: The directory to check for plugins.
 	:param timeout: The maximum time to wait for plugins to load, in seconds. Default is 30 seconds.
-	:return: True if plugins were loaded successfully, False if the timeout was reached without loading any plugins.
+	:return: True if loaded successfully or empty, False on failure/timeout/missing dir.
 	"""
+	if not plugin_dir or not os.path.isdir(plugin_dir):
+		return False
+
+	py_files = [f for f in os.listdir(plugin_dir) if f.endswith(".py")]
+	if not py_files:
+		return True
+
 	start_time = time.time()
 	while time.time() - start_time < timeout:
-		py_files = [f for f in os.listdir(plugin_dir) if f.endswith(".py")]
-		if py_files:
-			load_plugins(plugin_dir)
-			if PLUGINS:
-				print("Plugins successfully loaded.")
-				return True
+		load_plugins(plugin_dir)
+		if PLUGINS:
+			print("Plugins successfully loaded.")
+			return True
 		print("Waiting for plugins to load...")
 		time.sleep(1)
 
 	print("Plugin loading timed out after", timeout, "seconds.")
 	return False
-
 
 def printd(*args):
 	"""
@@ -302,7 +300,7 @@ def play_video(source, commercials, max_commercials_per_break, start_pos, bumper
 	# launches OMXPlayer on the PI to play a video
 	# If commercials are set, 2 instances of the players are loaded: one for the main video and the other for commercials (the main player is hidden during commercial breaks and then made visible again)
 	# 	source: video file to be played
-	# 	commercials: array of times in seconds az~!@E#At which the source video will be interrupt to play commercials
+	# 	commercials: array of times in seconds at which the source video will be interrupt to play commercials
 	#	max_commercials_per_break:
 	#		If set to a number, a random commercial will be continually selected up until the supplied number has been reached
 	#		if an array of commercials video file locations is provided, each commercial will be played until there are none left
@@ -2313,16 +2311,29 @@ printd("Cache directory verified")
 
 # Load plugins
 plugin_dir = get_setting(["plugins directory"], None)
-if plugin_dir and os.path.isdir(plugin_dir):
-	printd("Plugin directory found:", plugin_dir)
+if plugin_dir:
+	if not os.path.exists(plugin_dir):
+		try:
+			os.makedirs(plugin_dir)
+			os.chmod(plugin_dir, 0777)
+			try:
+				import pwd, grp
+				uid = pwd.getpwnam("pi").pw_uid
+				gid = grp.getgrnam("pi").gr_gid
+				os.chown(plugin_dir, uid, gid)
+			except Exception:
+				pass
+			report_error("PLUGIN_LOAD", ["Plugins directory set in settings file but did not exist, it does now."])
+		except Exception as e:
+			report_error("PLUGIN_LOAD", ["Failed to create plugin directory", plugin_dir, str(e)])
+
 	if not wait_for_plugins(plugin_dir):
 		report_error("PLUGIN_LOAD", [
-			"Plugin directory is set but plugins failed to load.",
-			plugin_dir,
-			"If no plugins exist, remove the plugin directory setting from settings.json to avoid this error."
+			"Plugin directory could not be accessed or plugins failed to load.",
+			plugin_dir
 		])
 else:
-	printd("No plugin directory set or directory does not exist")
+	printd("No plugin directory set")
 
 # Playback control variables
 allow_chance = True
