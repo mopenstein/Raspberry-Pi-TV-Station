@@ -1120,6 +1120,23 @@ function handleRandomVideoByCount($episode, $filter) {
 	return "$file|$status|$msg|$dir";
 }
 
+function isStationRunning() {
+    // Specifically match python executing _station.py to prevent false positives
+    $output = shell_exec('pgrep -f "^python.*_station\.py" 2>/dev/null');
+    return !empty(trim($output));
+}
+
+// Place in functions.php
+if (isset($_GET['station_status'])) {
+    header('Content-Type: application/json');
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    echo json_encode([
+        'running' => isStationRunning(),
+        'timestamp' => time()
+    ]);
+    exit;
+}
+
 function getRandomVideoByCount($directory, $filter = "mp4,mkv,avi,mpeg,mpg,mov,webm,m4v,flv,wmv") {
 	global $mysqli;
 	global $parsedShows;

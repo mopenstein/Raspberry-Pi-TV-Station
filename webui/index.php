@@ -449,6 +449,7 @@ $View = [
     'title' => $json_settings["name"] ?? "Pi Station",
     'the_date' => $the_date,
     'sys' => [
+		'is_broadcasting' => isStationRunning(),
         'uptime' => getUptime($mysqli),
         'temp_f' => (round(((getLocalTemperature()/1000) * (9/5))) + 32),
         'load'   => sys_getloadavg()[0] * 100,
@@ -469,6 +470,7 @@ $View = [
         'stats_summary' => []
     ]
 ];
+// In index.php under the preload section
 
 // Preload Disk Space
 $View['sys']['disk'][] = 'Root SD ' . floor(disk_free_space("/.") / (1024**3)) . 'GB';
