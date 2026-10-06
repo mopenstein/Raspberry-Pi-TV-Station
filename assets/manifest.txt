@@ -42,8 +42,8 @@ sync:webui/manage/ThemeManager.php->/var/www/html/manage/ThemeManager.php
 
 sync:webui/templates/modern.php->/var/www/html/templates/modern.php
 sync:webui/templates/modern.preview.png->/var/www/html/templates/modern.preview.png
-sync:webui/templates/windows.php->/var/www/html/templates/windows.php
-sync:webui/templates/windows.preview.png->/var/www/html/templates/windows.preview.png
+ifsync:webui/templates/windows.php->/var/www/html/templates/windows.php
+ifsync:webui/templates/windows.preview.png->/var/www/html/templates/windows.preview.png
 
 sync:webui/setup/complete.php->/var/www/html/setup/complete.php
 sync:webui/setup/index.php->/var/www/html/setup/index.php
