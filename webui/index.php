@@ -235,21 +235,21 @@ while ($row = $res->fetch_assoc()) {
 		$currentType = $splits[count($splits) + $comm_offset];
 	}
 
-	$videoPath = stripslashes($rname);
-	$videoUrl = urlencode($videoPath);
+	$fullPath = stripslashes($row["name"]);
+    $videoUrl = urlencode($fullPath);
 
-	$comms[] = [
-		'id' 		   => $row["id"],
-		'color'        => getCommercialTypeColor($currentType),
-		'timestamp'    => $row["played"],		// Matches $s['timestamp']
-		'folder'       => $splits[count($splits) - 2],
-		'typeLabel'    => $currentType,
-		'emoji'        => $comm_type_emoji[$comm_type] ?? '2753', // Default to '?' emoji if missing
-		'videoUrl'     => $videoUrl,
-		'filename'     => basename($videoPath),
-		'length'       => $len,
-		'flag' 		   => $row["flag"]
-	];
+    $comms[] = [
+        'id'           => $row["id"],
+        'color'        => getCommercialTypeColor($currentType),
+        'timestamp'    => $row["played"],       // Matches $s['timestamp']
+        'folder'       => $splits[count($splits) - 2],
+        'typeLabel'    => $currentType,
+        'emoji'        => $comm_type_emoji[$comm_type] ?? '2753', // Default to '?' emoji if missing
+        'videoUrl'     => $videoUrl,
+        'filename'     => basename($fullPath),
+        'length'       => $len,
+        'flag'         => $row["flag"]
+    ];
 }
 
     return $comms;

@@ -868,12 +868,18 @@ if(isset($_GET["getavailable"]) && isset($_GET["dir"])) {
 			echo "File does not exist: " . $getavailable;
 		}
 	}
-	if(!is_dir($dir)) die('0');
+	if(!is_dir($dir)) {
+		if(isset($_GET["h"])) echo "Directory does not exist: " . $dir;
+		die('0');
+	}
+
+	if(isset($_GET["h"])) echo "Directory exists: " . $dir;
+
 	$shortname=getTvShowName($getavailable, $parsedShows);
 	$showType=getShowType($shortname, $parsedShows);
 	
 	if(isset($_GET["h"])) {
-		
+		echo "Human readable output:\n";
 		function highlightDiff($string1, $string2) {
 			for($i=0;$i<strlen($string1);$i++) {
 				if(substr($string1,$i,1) != substr($string2,$i,1)) break;
