@@ -54,7 +54,7 @@ ifsync:webui/templates/source/windows/broadcast.preview.png->/var/www/html/templ
 ifsync:webui/templates/source/windows/niteowl.php->/var/www/html/templates/niteowl.php
 ifsync:webui/templates/source/windows/niteowl.preview.png->/var/www/html/templates/niteowl.preview.png
 
-# Option Plugin Updates
+# Optional Plugin Updates
 ifsync:plugins/source/pip/picture-in-picture.py->/home/pi/Desktop/plugins/picture-in-picture.py
 ifsync:plugins/source/pip/picture-in-picture.plugin.html->/var/www/html/docs/picture-in-picture.plugin.html
 ifsync:plugins/source/radio/radio.plugin.html->/home/pi/Desktop/plugins/radio.py
