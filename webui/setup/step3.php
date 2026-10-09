@@ -2,31 +2,43 @@
 $state_file = __DIR__ . '/state.json';
 require_once __DIR__ . '/reboot_helper.php';
 
+// Load or initialize state early
+$state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
+if (!is_array($state)) {
+    $state = [];
+}
+
+// Ensure state tracking keys exist
+if (!isset($state['mounted_drives']) || !is_array($state['mounted_drives'])) {
+    $state['mounted_drives'] = [];
+}
+if (!isset($state['step3_phase'])) {
+    $state['step3_phase'] = 'mount'; // 'mount' or 'post_mount_choice'
+}
+
+// Next page after completing all drive mounting
+$next_step_url = 'step4.php';
+$reboot_target = ($state['step3_phase'] === 'post_mount_choice') ? 'step3.php' : $next_step_url;
+
 // Handle reboot & ping healthcheck requests
-handle_reboot_logic('step4.php');
+handle_reboot_logic($reboot_target);
 
 // Gatekeeper: Ensure user belongs on Step 3
 if (!isset($_GET['rebooting'])) {
-    if (file_exists($state_file)) {
-        $state = json_decode(file_get_contents($state_file), true);
-        $active_step = $state['step'] ?? 3;
-        if ($active_step < 3) {
-            header("Location: step{$active_step}.php");
-            exit;
-        } elseif ($active_step > 3) {
-            header("Location: step{$active_step}.php");
-            exit;
-        }
+    $active_step = $state['step'] ?? 3;
+    if ($active_step < 3 || $active_step > 3) {
+        header("Location: step{$active_step}.php");
+        exit;
     }
 }
 
 $error = '';
 
-// Handle Skip Action
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['skip_step'])) {
-    $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
+// Handle Skip / Finish Action
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['skip_step']) || isset($_POST['finish_step3']))) {
     $state['step'] = 4;
-    $state['skipped_step3'] = true;
+    $state['drives'] = $state['mounted_drives'];
+    $state['step3_phase'] = 'mount';
     $state['updated_at'] = time();
     file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
 
@@ -34,15 +46,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['skip_step'])) {
     exit;
 }
 
-// Function to scan USB partitions & assign dynamic letter targets
-function get_usb_partitions() {
+// Function to scan USB partitions & assign persistent letter targets
+function get_usb_partitions($already_mounted_uuids = []) {
     $raw_json = shell_exec('lsblk -J -b -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,LABEL,UUID 2>/dev/null');
     $data = json_decode($raw_json, true);
     $partitions = [];
 
     if (!empty($data['blockdevices'])) {
         foreach ($data['blockdevices'] as $dev) {
-            // Filter internal micro-SD, eMMC, zram, and loop devices
             if (strpos($dev['name'], 'mmcblk') === 0 || strpos($dev['name'], 'loop') === 0 || strpos($dev['name'], 'zram') === 0) {
                 continue;
             }
@@ -59,78 +70,75 @@ function get_usb_partitions() {
         }
     }
 
-    // Assign /media/pi/drive_A through drive_Z based on discovery order
     $letters = range('A', 'Z');
-    foreach ($partitions as $idx => &$part) {
-        $part_letter = $letters[$idx] ?? ('Z' . $idx);
-        $part['target_mount'] = "/media/pi/drive_{$part_letter}";
+    $count = count($already_mounted_uuids);
+
+    foreach ($partitions as &$part) {
+        // If partition was already registered, keep assigned target mount
+        $matched_existing = null;
+        foreach ($already_mounted_uuids as $record) {
+            if ($record['uuid'] === $part['uuid']) {
+                $matched_existing = $record['mount_point'];
+                break;
+            }
+        }
+
+        if ($matched_existing) {
+            $part['target_mount'] = $matched_existing;
+            $part['is_registered'] = true;
+        } else {
+            $part_letter = $letters[$count] ?? ('Z' . $count);
+            $part['target_mount'] = "/media/pi/drive_{$part_letter}";
+            $part['is_registered'] = false;
+        }
     }
 
     return $partitions;
 }
 
-$partitions = get_usb_partitions();
+$already_registered = $state['mounted_drives'] ?? [];
+$partitions = get_usb_partitions($already_registered);
 
-// Handle Multi-Drive Selection & Persistent Mount
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mount_drives'])) {
-    $selected_uuids = $_POST['selected_partitions'] ?? [];
+// Handle Single Drive Mount
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mount_single_drive'])) {
+    $selected_uuid = trim($_POST['selected_partition'] ?? '');
+    $has_more_drives = (isset($_POST['has_more_drives']) && $_POST['has_more_drives'] === '1');
 
-    if (empty($selected_uuids) || !is_array($selected_uuids)) {
-        $error = 'Please select at least one partition to mount, or use Skip.';
+    if (empty($selected_uuid)) {
+        $error = 'Please select a drive to mount.';
     } else {
-        $mount_records = [];
-        $fstab_lines_to_add = [];
-        $current_fstab = file_get_contents('/etc/fstab');
-        $filtered_fstab_lines = [];
-
-        // Build list of targets to sanitize from current fstab
-        $targets_to_clean = [];
-        $uuids_to_clean = $selected_uuids;
-
-        foreach ($partitions as $part) {
-            if (in_array($part['uuid'], $selected_uuids)) {
-                $targets_to_clean[] = $part['target_mount'];
+        $selected_part = null;
+        foreach ($partitions as $p) {
+            if ($p['uuid'] === $selected_uuid) {
+                $selected_part = $p;
+                break;
             }
         }
 
-        // Clean out existing fstab references for selected UUIDs or mount points
-        foreach (explode("\n", $current_fstab) as $line) {
-            $skip_line = false;
-            foreach ($uuids_to_clean as $u) {
-                if (strpos($line, $u) !== false) {
-                    $skip_line = true;
-                    break;
-                }
-            }
-            if (!$skip_line) {
-                foreach ($targets_to_clean as $t) {
-                    if (strpos($line, $t) !== false) {
-                        $skip_line = true;
-                        break;
-                    }
-                }
-            }
-            if (!$skip_line && trim($line) !== '') {
-                $filtered_fstab_lines[] = $line;
-            }
-        }
+        if (!$selected_part) {
+            $error = 'Selected partition could not be verified. Please refresh.';
+        } else {
+            $uuid = $selected_part['uuid'];
+            $fstype = $selected_part['fstype'] ?: 'auto';
+            $mount_target = $selected_part['target_mount'];
 
-        // Process each selected partition
-        foreach ($partitions as $part) {
-            if (!in_array($part['uuid'], $selected_uuids)) {
-                continue;
-            }
-
-            $uuid = $part['uuid'];
-            $fstype = $part['fstype'] ?: 'auto';
-            $mount_target = $part['target_mount'];
-
-            // 1. Create directory structure
+            // 1. Create target directory
             shell_exec('sudo mkdir -p ' . escapeshellarg($mount_target));
             shell_exec('sudo chown -R pi:www-data ' . escapeshellarg($mount_target));
             shell_exec('sudo chmod 775 ' . escapeshellarg($mount_target));
 
-            // 2. Determine mount flags based on filesystem
+            // 2. Build clean fstab
+            $current_fstab = file_get_contents('/etc/fstab');
+            $filtered_fstab_lines = [];
+            foreach (explode("\n", $current_fstab) as $line) {
+                if (strpos($line, $uuid) !== false || strpos($line, $mount_target) !== false) {
+                    continue;
+                }
+                if (trim($line) !== '') {
+                    $filtered_fstab_lines[] = $line;
+                }
+            }
+
             if (in_array($fstype, ['vfat', 'fat', 'exfat', 'ntfs'])) {
                 $fstab_opts = 'defaults,nofail,x-systemd.device-timeout=5,uid=1000,gid=33,umask=0002';
             } else {
@@ -139,35 +147,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mount_drives'])) {
 
             $filtered_fstab_lines[] = "UUID={$uuid}  {$mount_target}  {$fstype}  {$fstab_opts}  0  2";
 
-            $mount_records[] = [
+            // 3. Write fstab safely
+            file_put_contents('/tmp/fstab.tmp', implode("\n", $filtered_fstab_lines) . "\n");
+            shell_exec('cat /tmp/fstab.tmp | sudo tee /etc/fstab > /dev/null');
+            @unlink('/tmp/fstab.tmp');
+
+            shell_exec('sudo systemctl daemon-reload');
+            shell_exec('sudo mount -a 2>/dev/null');
+
+            // 4. Update session tracking in state.json
+            $existing_idx = null;
+            foreach ($state['mounted_drives'] as $i => $rec) {
+                if ($rec['uuid'] === $uuid) {
+                    $existing_idx = $i;
+                    break;
+                }
+            }
+
+            $new_record = [
                 'uuid' => $uuid,
                 'mount_point' => $mount_target,
                 'fstype' => $fstype,
-                'label' => $part['label'] ?? 'STORAGE'
+                'label' => $selected_part['label'] ?? ('Drive_' . substr($uuid, 0, 4))
             ];
+
+            if ($existing_idx !== null) {
+                $state['mounted_drives'][$existing_idx] = $new_record;
+            } else {
+                $state['mounted_drives'][] = $new_record;
+            }
+
+            $state['updated_at'] = time();
+
+            if ($has_more_drives) {
+                $state['step3_phase'] = 'post_mount_choice';
+                file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
+                header('Location: step3.php');
+                exit;
+            } else {
+                $state['step'] = 4;
+                $state['step3_phase'] = 'mount';
+                $state['drives'] = $state['mounted_drives'];
+                file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
+                header('Location: step3.php?rebooting=1');
+                exit;
+            }
         }
-
-        // 3. Write back to /etc/fstab safely
-        $new_fstab_content = implode("\n", $filtered_fstab_lines) . "\n";
-        file_put_contents('/tmp/fstab.tmp', $new_fstab_content);
-        shell_exec('cat /tmp/fstab.tmp | sudo tee /etc/fstab > /dev/null');
-        @unlink('/tmp/fstab.tmp');
-
-        // 4. Reload systemd mount engine and test
-        shell_exec('sudo systemctl daemon-reload');
-        shell_exec('sudo mount -a 2>/dev/null');
-
-        // 5. Advance State Machine
-        $state = file_exists($state_file) ? json_decode(file_get_contents($state_file), true) : [];
-        $state['step'] = 4;
-        $state['drives'] = $mount_records;
-        $state['updated_at'] = time();
-        file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
-
-        // 6. Restart to verify persistent mounting on boot
-        header('Location: step3.php?rebooting=1');
-        exit;
     }
+}
+
+// Handle Reboot to Next Drive
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reboot_for_next_drive'])) {
+    $state['step3_phase'] = 'mount';
+    $state['updated_at'] = time();
+    file_put_contents($state_file, json_encode($state, JSON_PRETTY_PRINT));
+
+    header('Location: step3.php?rebooting=1');
+    exit;
 }
 
 function format_bytes($bytes) {
@@ -197,7 +233,7 @@ function format_bytes($bytes) {
         }
         .container {
             width: 100%;
-            max-width: 540px;
+            max-width: 560px;
             background: #181c24;
             border: 1px solid #28303f;
             border-radius: 16px;
@@ -228,11 +264,11 @@ function format_bytes($bytes) {
             color: #8b949e;
             font-size: 0.95rem;
             line-height: 1.5;
-            margin: 0 0 24px 0;
+            margin: 0 0 20px 0;
         }
-        .notice-card {
-            background: rgba(234, 179, 8, 0.08);
-            border: 1px solid rgba(234, 179, 8, 0.25);
+        .warning-card {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.35);
             border-radius: 12px;
             padding: 16px;
             margin-bottom: 20px;
@@ -240,18 +276,38 @@ function format_bytes($bytes) {
             align-items: flex-start;
             gap: 12px;
         }
-        .notice-icon {
-            font-size: 1.3rem;
+        .warning-icon {
+            font-size: 1.4rem;
             line-height: 1;
             flex-shrink: 0;
         }
-        .notice-text {
+        .warning-text {
             font-size: 0.88rem;
             line-height: 1.45;
-            color: #e2c044;
+            color: #fbbf24;
         }
-        .notice-text strong {
-            color: #ffd84d;
+        .warning-text strong {
+            color: #fde68a;
+        }
+        .info-card {
+            background: rgba(0, 212, 255, 0.08);
+            border: 1px solid rgba(0, 212, 255, 0.25);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .info-title {
+            color: #00d4ff;
+            font-size: 0.95rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .info-card ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #c9d1d9;
+            font-size: 0.88rem;
+            line-height: 1.5;
         }
         .error-card {
             background: rgba(239, 68, 68, 0.1);
@@ -265,8 +321,8 @@ function format_bytes($bytes) {
         .drive-list {
             display: flex;
             flex-direction: column;
-            gap: 14px;
-            margin-bottom: 24px;
+            gap: 12px;
+            margin-bottom: 20px;
         }
         .drive-card {
             background: #202632;
@@ -282,9 +338,9 @@ function format_bytes($bytes) {
         .drive-card:hover {
             border-color: #3b475d;
         }
-        .drive-card input[type="checkbox"] {
-            width: 22px;
-            height: 22px;
+        .drive-card input[type="radio"] {
+            width: 20px;
+            height: 20px;
             accent-color: #00d4ff;
             margin-top: 3px;
             cursor: pointer;
@@ -302,7 +358,7 @@ function format_bytes($bytes) {
             gap: 6px;
         }
         .drive-title {
-            font-size: 1.05rem;
+            font-size: 1rem;
             font-weight: 600;
             color: #ffffff;
         }
@@ -319,7 +375,6 @@ function format_bytes($bytes) {
             font-size: 0.82rem;
             color: #8b949e;
             line-height: 1.4;
-            margin-top: 2px;
         }
         .drive-sub code {
             font-family: monospace;
@@ -328,15 +383,59 @@ function format_bytes($bytes) {
             border-radius: 4px;
             color: #79c0ff;
         }
-        .mounted-tag {
-            display: inline-block;
-            margin-top: 6px;
-            font-size: 0.78rem;
-            color: #e2c044;
-            background: rgba(234, 179, 8, 0.12);
-            padding: 2px 8px;
-            border-radius: 4px;
-            border: 1px solid rgba(234, 179, 8, 0.3);
+        .configured-card {
+            background: #151a23;
+            border: 1px solid #242c3b;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .configured-title {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #56d364;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .configured-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.88rem;
+            padding: 6px 0;
+            border-bottom: 1px solid #1f2736;
+        }
+        .configured-row:last-child {
+            border-bottom: none;
+        }
+        .multi-toggle {
+            background: #202632;
+            border: 1px solid #2e3748;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .multi-toggle label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #f0f3f6;
+        }
+        .multi-toggle input[type="checkbox"] {
+            width: 22px;
+            height: 22px;
+            accent-color: #00d4ff;
+            cursor: pointer;
+        }
+        .toggle-hint {
+            margin: 6px 0 0 34px;
+            font-size: 0.82rem;
+            color: #8b949e;
+            line-height: 1.4;
         }
         .empty-drives {
             text-align: center;
@@ -346,19 +445,15 @@ function format_bytes($bytes) {
             border-radius: 12px;
             margin-bottom: 24px;
         }
-        .empty-icon {
-            font-size: 2rem;
-            margin-bottom: 8px;
-        }
         .btn-submit {
             display: block;
             width: 100%;
-            padding: 18px;
+            padding: 16px;
             background: #00d4ff;
             color: #050b14;
             border: none;
             border-radius: 12px;
-            font-size: 1.15rem;
+            font-size: 1.05rem;
             font-weight: 700;
             text-align: center;
             cursor: pointer;
@@ -370,7 +465,7 @@ function format_bytes($bytes) {
             transform: scale(0.98);
             background: #00bce3;
         }
-        .btn-skip {
+        .btn-secondary {
             display: block;
             width: 100%;
             padding: 14px;
@@ -383,19 +478,19 @@ function format_bytes($bytes) {
             font-weight: 600;
             text-align: center;
             cursor: pointer;
+            text-decoration: none;
             transition: all 0.15s ease;
-            -webkit-tap-highlight-color: transparent;
         }
-        .btn-skip:hover {
+        .btn-secondary:hover {
             background: #21262d;
             color: #c9d1d9;
             border-color: #484f58;
         }
-        .btn-skip:active {
+        .btn-secondary:active {
             transform: scale(0.98);
         }
 
-        /* Reboot Helper View Styles */
+        /* Reboot View Styles */
         .reboot-view { text-align: center; padding: 16px 0; }
         .spinner { margin: 20px auto 28px; width: 52px; height: 52px; border: 4px solid #232a37; border-top: 4px solid #00d4ff; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -412,18 +507,75 @@ function format_bytes($bytes) {
 <div class="container">
 
 <?php if (isset($_GET['rebooting'])): ?>
-    <?php render_reboot_screen('step4.php'); ?>
-<?php else: ?>
-    <div class="badge">Step 3 of 5</div>
-    <h1>Media Storage</h1>
-    <p class="subtitle">Select attached USB storage to mount under <code>/media/pi/drive_*</code>.</p>
+    <?php render_reboot_screen($reboot_target); ?>
 
-    <div class="notice-card">
-        <div class="notice-icon">⚡</div>
-        <div class="notice-text">
-            <strong>Reboot Notice:</strong> Registering persistent mounts in <code>/etc/fstab</code> requires a restart (~30s) to verify systemd boot mounting.
+<?php elseif ($state['step3_phase'] === 'post_mount_choice'): ?>
+    <!-- Post-Mount State: Prompt user before triggering restart -->
+    <div class="badge">Step 3: Setup Loop</div>
+    <h1>Drive Mounted</h1>
+    <p class="subtitle">Drive recorded to <code>/etc/fstab</code>. Prepare the Pi for the next drive.</p>
+
+    <div class="warning-card">
+        <div class="warning-icon">⚠️</div>
+        <div class="warning-text">
+            <strong>Action Required:</strong> Plug in your next USB SSD now. Do not disconnect the previously mounted drive(s). Once connected, restart the Pi to initialize the hardware and return here to mount it.
         </div>
     </div>
+
+    <?php if (!empty($state['mounted_drives'])): ?>
+        <div class="configured-card">
+            <div class="configured-title">Configured Drives (<?= count($state['mounted_drives']) ?>)</div>
+            <?php foreach ($state['mounted_drives'] as $drv): ?>
+                <div class="configured-row">
+                    <span><strong><?= htmlspecialchars($drv['label']) ?></strong> (<code><?= htmlspecialchars($drv['fstype']) ?></code>)</span>
+                    <span style="color: #00d4ff; font-family: monospace;"><?= htmlspecialchars($drv['mount_point']) ?></span>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+
+    <form method="POST">
+        <button type="submit" name="reboot_for_next_drive" value="1" class="btn-submit">
+            Reboot Pi to Detect Next Drive
+        </button>
+        <button type="submit" name="finish_step3" value="1" class="btn-secondary">
+            Done Adding Drives &bull; Continue to Step 4
+        </button>
+    </form>
+
+<?php else: ?>
+    <!-- Primary Step 3 Mounting Interface -->
+    <div class="badge">Step 3 of 5</div>
+    <h1>Media Storage</h1>
+    <p class="subtitle">Mount external storage partitions one drive at a time.</p>
+
+    <div class="warning-card">
+        <div class="warning-icon">⚠️</div>
+        <div class="warning-text">
+            <strong>USB Bus Warning:</strong> Raspberry Pis can drop USB drives or fail to enumerate partitions when detecting multiple external SSDs at once due to shared USB bus bandwidth and peak power spikes.
+        </div>
+    </div>
+
+    <div class="info-card">
+        <div class="info-title">Multi-Drive Sequential Setup</div>
+        <ul>
+            <li>If you have <strong>more than 1 drive</strong>, unplug all except the first one and refresh.</li>
+            <li>Mount the active drive below.</li>
+            <li>Plug in the second drive, reboot, and repeat this process.</li>
+        </ul>
+    </div>
+
+    <?php if (!empty($state['mounted_drives'])): ?>
+        <div class="configured-card">
+            <div class="configured-title">Mounted in this setup (<?= count($state['mounted_drives']) ?>)</div>
+            <?php foreach ($state['mounted_drives'] as $drv): ?>
+                <div class="configured-row">
+                    <span><?= htmlspecialchars($drv['label']) ?></span>
+                    <span style="color: #56d364; font-family: monospace;">Registered &rarr; <?= htmlspecialchars($drv['mount_point']) ?></span>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
 
     <?php if (!empty($error)): ?>
         <div class="error-card"><?= htmlspecialchars($error) ?></div>
@@ -432,15 +584,15 @@ function format_bytes($bytes) {
     <form method="POST">
         <?php if (!empty($partitions)): ?>
             <div class="drive-list">
-                <?php foreach ($partitions as $part): ?>
+                <?php foreach ($partitions as $idx => $part): ?>
                     <?php 
                     $label = !empty($part['label']) ? $part['label'] : 'USB Drive (' . $part['name'] . ')';
                     $size = format_bytes($part['size']);
                     $fs = strtoupper($part['fstype'] ?: 'UNKNOWN');
-                    $is_mounted = !empty($part['mountpoint']);
+                    $is_registered = !empty($part['is_registered']);
                     ?>
-                    <label class="drive-card">
-                        <input type="checkbox" name="selected_partitions[]" value="<?= htmlspecialchars($part['uuid']) ?>" checked>
+                    <label class="drive-card" style="<?= $is_registered ? 'opacity: 0.65;' : '' ?>">
+                        <input type="radio" name="selected_partition" value="<?= htmlspecialchars($part['uuid']) ?>" <?= (!$is_registered && $idx === 0) ? 'checked' : '' ?>>
                         <div class="drive-content">
                             <div class="drive-header">
                                 <span class="drive-title"><?= htmlspecialchars($label) ?> (<?= $size ?>)</span>
@@ -448,33 +600,42 @@ function format_bytes($bytes) {
                             </div>
                             <div class="drive-sub">
                                 Format: <code><?= htmlspecialchars($fs) ?></code> &bull; 
-                                Dev: <code>/dev/<?= htmlspecialchars($part['name']) ?></code>
+                                UUID: <code><?= htmlspecialchars(substr($part['uuid'], 0, 13)) ?>...</code>
                             </div>
-
-                            <?php if ($is_mounted): ?>
-                                <div class="mounted-tag">
-                                    Currently mounted at: <strong><?= htmlspecialchars($part['mountpoint']) ?></strong>
-                                </div>
+                            <?php if ($is_registered): ?>
+                                <div style="font-size: 0.78rem; color: #56d364; margin-top: 4px;">&check; Already added to fstab</div>
                             <?php endif; ?>
                         </div>
                     </label>
                 <?php endforeach; ?>
             </div>
 
-            <button type="submit" name="mount_drives" value="1" class="btn-submit">Mount Selected & Restart to Step 4</button>
+            <div class="multi-toggle">
+                <label>
+                    <input type="checkbox" name="has_more_drives" value="1">
+                    I have additional USB drives to plug in and mount
+                </label>
+                <div class="toggle-hint">
+                    Check this if you are mounting multiple drives. After this drive mounts, you will be prompted to insert the next drive and restart.
+                </div>
+            </div>
+
+            <button type="submit" name="mount_single_drive" value="1" class="btn-submit">
+                Mount Drive & Continue
+            </button>
         <?php else: ?>
             <div class="empty-drives">
-                <div class="empty-icon">🔌</div>
+                <div style="font-size: 2rem; margin-bottom: 8px;">🔌</div>
                 <strong style="color: #ffffff; display: block; margin-bottom: 6px;">No USB Drives Detected</strong>
                 <p style="font-size: 0.85rem; color: #8b949e; margin: 0 0 16px 0;">
-                    Plug your USB drive(s) into the Pi and refresh.
+                    Plug in one USB drive at a time and refresh the page.
                 </p>
-                <a href="step3.php" class="btn-skip" style="border-color: #3b475d; display: inline-block; width: auto; padding: 8px 18px;">Refresh List</a>
+                <a href="step3.php" class="btn-secondary" style="display: inline-block; width: auto; padding: 8px 18px;">Refresh List</a>
             </div>
         <?php endif; ?>
 
-        <button type="submit" name="skip_step" value="1" class="btn-skip" formnovalidate>
-            <?= empty($partitions) ? 'Skip This Step (No USB Drives)' : 'Keep Current Storage / Skip' ?>
+        <button type="submit" name="skip_step" value="1" class="btn-secondary" formnovalidate>
+            <?= empty($partitions) && empty($state['mounted_drives']) ? 'Skip Storage Setup' : 'Done Adding Drives / Skip Remaining' ?>
         </button>
     </form>
 
