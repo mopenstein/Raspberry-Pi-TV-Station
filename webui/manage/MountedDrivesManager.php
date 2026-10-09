@@ -60,8 +60,6 @@ class MountedDrivesManager implements ManageCard {
         $this->html .= '<tr style="border-bottom:1px solid rgba(255,255,255,0.15); color:#888; font-size:10px; text-transform:uppercase; letter-spacing:0.5px;">';
         $this->html .= '<th style="padding:6px 4px;">Device</th>';
         $this->html .= '<th style="padding:6px 4px;">Mount</th>';
-        $this->html .= '<th style="padding:6px 4px;">FS</th>';
-        $this->html .= '<th style="padding:6px 4px; min-width:85px;">Usage</th>';
         $this->html .= '</tr>';
 
         foreach ($drives as $drive) {
@@ -106,19 +104,14 @@ class MountedDrivesManager implements ManageCard {
             // Mount point column
             $this->html .= '<td style="padding:6px 4px; font-family:monospace; font-size:11px; word-break:break-all;">';
             $this->html .= htmlspecialchars($mount);
-            $this->html .= '</td>';
-
-            // Filesystem type
-            $this->html .= '<td style="padding:6px 4px; font-size:10px; color:#aaa;">' . htmlspecialchars($fsType) . '</td>';
-
-            // Usage progress bar + Combined Free/Total Subtext
-            $this->html .= '<td style="padding:6px 4px;">';
+			$this->html .= '<br />';
             $this->html .= '<div style="background:rgba(255,255,255,0.1); border-radius:3px; height:6px; width:100%; overflow:hidden; margin-bottom:3px;">';
             $this->html .= "<div style=\"background:{$barColor}; width:{$usedPercent}%; height:100%;\"></div>";
             $this->html .= '</div>';
             $this->html .= '<div style="display:flex; justify-content:space-between; font-size:9px; color:#999; font-family:monospace; white-space:nowrap; gap:4px;">';
             $this->html .= "<span>{$usedPercent}%</span>";
-            $this->html .= "<span>{$freeFormatted} free</span>";
+            $this->html .= "<span>{$freeFormatted} of {$totalFormatted}</span>";
+			$this->html .= "<span>" . htmlspecialchars($fsType) . "</span>";
             $this->html .= '</div>';
             $this->html .= '</td>';
 
