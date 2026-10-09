@@ -14,11 +14,11 @@ The engine runs on the Raspberry Pi, utilizing OMXPlayer and D-Bus to manage vid
 ## Component Ecosystem
 To maintain a high-quality broadcast, media must be properly mastered. Two companion Windows utilities are provided to handle file preparation:
 
-1. **[VideoSplit](https://github.com/mopenstein/VideoSplit):** An FFMPEG-based automation tool that identifies commercial breaks by detecting black frames and normalizes audio levels across all clips for consistent broadcast volume (amoungst other useful things for this project).
-2. **[Simple Video Editor](https://github.com/mopenstein/Simple-Video-Editor):** A streamlined FFMPEG frontend designed for precise manual video splitting and combining.
+1. **[TV Station Assistant](https://github.com/mopenstein/TV-Station-Assistant):** An FFMPEG-based automation tool that identifies commercial breaks, normalizes audio levels across all clips for consistent broadcast volume, and adds length markers to filenames. (amongst other useful things for this project).
+2. **[Simple Video Editor](https://github.com/mopenstein/Simple-Video-Editor):** A streamlined FFMPEG frontend designed for precise manual video splitting.
 
 ## Technical Requirements & Compatibility
-* **Hardware:** Raspberry Pi 3B+ (utilized for stable A/V composite output).
+* **Hardware:** Raspberry Pi 2B, 3B, and 3B+ (utilized for stable A/V composite output).
 * **Operating System:** Raspberry Pi OS (Legacy/Buster) is required to support the deprecated OMXPlayer binary and OpenMAX hardware abstraction layer.
 * **Environment:** Python 2.7, PHP 7
 
