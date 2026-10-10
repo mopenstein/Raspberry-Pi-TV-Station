@@ -190,6 +190,7 @@ def handle(keyword, programming_schedule):
 						selected_dir = functions["weighted_random_choice"](format_paths, weights)
 					else:
 						selected_dir = random.choice(format_paths)
+						functions["printd"]("Radio;", "Randomly selected directory:", selected_dir, ";from list:", format_paths)
 				else:
 					selected_dir = format_paths
 
@@ -257,8 +258,9 @@ def handle(keyword, programming_schedule):
 							print("No files found in folder:", selected_folder)
 							break
 						source = random.choice(dircontents[selected_dir])
+						grandparent = os.path.dirname(os.path.abspath(selected_folder))
 
-						url = "http://127.0.0.1/?" + urllib.urlencode({ 'getavailable': source, 'dir': selected_folder })
+						url = "http://127.0.0.1/?" + urllib.urlencode({ 'getavailable': source, 'dir': grandparent })
 						urlcontents = functions["open_url"](url)
 						functions["printd"]("Available episodes response:", urlcontents)
 						parts = urlcontents.split("\n")
@@ -356,6 +358,8 @@ def kill_players():
 import threading
 
 def play_file(source, vtype="video", end_early=0, stop_at=-1, blocking=True):
+	global players, functions, global_settings, player_count
+
 	if source is None:
 		return
 
@@ -363,8 +367,6 @@ def play_file(source, vtype="video", end_early=0, stop_at=-1, blocking=True):
 		functions["printd"]("Source file does not exist:", source)
 		functions["report_error"]("RADIO PLAYBACK ERROR", ["Source file missing", "SOURCE", source])
 		return False
-
-	global players, functions, global_settings, player_count
 
 	try:
 		duration = functions["get_length_from_file"](source)
