@@ -1,46 +1,50 @@
-# Raspberry Pi Radio Automation Plugin (v0.1)
+# Plugin Installation Guide
 
-A flexible, keyword-driven radio automation plugin designed for Python 2 and `omxplayer`. This system allows for complex radio programming schedules, including DJ "shifts," automated commercials, background audio "beds," and seasonal content ramping.
+Plugins add custom playback handlers, keywords, and schedule behaviors to the TV station emulator.
 
-> **Note:** The included settings file is provided as a reference example. Users are expected to create their own `settings.json` tailored to their specific directory structures, media paths, and programming needs.
+You can install plugins in two ways: through the **Station Management Web UI** using packaged plugin bundles, or manually by copying Python source files to your station's **plugins directory**.
 
-## Features
+---
 
-* **Keyword Handling**: Supports `audio` (simple folder playback) and `radio` (complex format playback).
-* **Playback Modes**:
-    * `random`: Standard shuffle.
-    * `balanced`: Uses backend logic to ensure a varied rotation.
-    * `ordered`: Plays files in a specific sequence.
-    * `ordered-show`: Designed for episodic content (e.g., Casey Kasem, Rick Dees).
-    * `commercial`: Specialized logic for advertisement breaks.
-* **Dynamic Background "Beds"**: Automatically plays background music/ambience under banter or news clips.
-* **Weighted Rotation**: Assign probabilities to specific folders (e.g., 50% Pop, 20% Rock).
-* **Advanced Scheduling**: Support for "shifts," date ranges (Halloween/Christmas), and "chance" equations for gradual content introduction.
+## Method 1: Web UI Installation (`.tvplugin`)
 
-## Prerequisites
+Packaged plugins use the `.tvplugin` archive format (a zip bundle containing the plugin files and assets).
 
-* **Hardware**: Raspberry Pi (designed for `omxplayer` hardware acceleration).
-* **OS**: Legacy Raspberry Pi OS (supporting Python 2.7 and OMXPlayer).
-* **Dependencies**:
-    * `omxplayer-wrapper` (Python library)
-    * `dbus`
-    * A local backend server (listening on `127.0.0.1`) to handle `balanced` and `ordered` logic.
+1. Open the station's web interface in your browser.
+2. Navigate to **Station Management**.
+3. Locate the **Plugins** card.
+4. Click **Upload** (or drag and drop) and select your `.tvplugin` file.
+5. The station server will automatically unpack and place the plugin files into the configured plugins directory.
+6. The emulator will register the plugin immediately or on the next loop cycle.
 
-## Customization (settings.json)
+---
 
-The system is highly data-driven. To set up your station:
+## Method 2: Manual Installation from Source (`.py`)
 
-1. **Define Paths**: Map your drives (e.g., `%D[1]%`, `%D[2]%`) to your local mount points.
-2. **Configure Shifts**: Define your DJ or programming blocks in the `vars` section.
-3. **Build Formats**: Create `radio` format arrays to chain elements together:
-   * **Commercials** (Looping)
-   * **Jingles** (Random)
-   * **Banter** (Balanced with a "Bed" track)
-   * **Music** (Weighted selection)
+If you have individual Python source files (such as `picture-in-picture.py`):
 
-## Plugin Integration
+1. Check your `settings.json` file to identify your plugins folder path:
+   ```json
+   {
+       "plugins directory": "/home/pi/tvstation/plugins"
+   }
+   ```
+2. Copy the `.py` plugin file into that directory:
+   ```bash
+   cp my-plugin.py /path/to/plugins/
+   ```
+3. Ensure file permissions allow the emulator to read the file:
+   ```bash
+   chmod 664 /path/to/plugins/my-plugin.py
+   ```
+4. The station will automatically discover and load any `.py` file containing valid `handle()` and `keywords` definitions. If `settings.json` is modified or saved, the emulator automatically calls `refresh_plugins()`.
 
-The plugin registers itself with the main engine and requires access to specific shared functions provided by the host application, such as `eval_equation` for processing logic and `replace_all_special_words` for path parsing.
+---
 
-## License
-This project is provided "as-is" for radio enthusiasts and hobbyists.
+## Verifying Installation
+
+* Check the terminal output or station logs for:
+  ```text
+  Loaded plugin: <plugin_name>
+  ```
+* Once loaded, you can use the plugin's registered keyword as a `"type"` in your `settings.json` schedule blocks.
