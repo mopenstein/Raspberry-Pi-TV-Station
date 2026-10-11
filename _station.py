@@ -4,6 +4,13 @@
 #
 #	Migrating to _station.py from _rnd80s.py
 #	Fixed ownership issues with cache
+#	Implemented a broadcast state management API to allow for thread-safe access to the current state of the video player from remote sources (e.g., web server)
+#	Added new wrapper functions for state management api:
+#		- api_update_main - Updates the main broadcast state (video/audio) in a thread-safe manner.
+#		- api_set_override - Sets an override layer that can pause the main broadcast (e.g., for commercials).
+#		- api_clear_override - Clears an override layer, allowing the main broadcast to resume.
+#		- api_set_submedia - Sets an independent submedia layer (e.g., PiP, audio beds) alongside the main broadcast.
+#		- api_clear_submedia - Clears an independent submedia layer.
 #
 # settings version: 0.996
 #
@@ -32,6 +39,8 @@ import subprocess				# for rebooting the machine
 import traceback				# for error reporting
 import hashlib					# for generating hash IDs
 import ast						# for safely evaluating mathematical expressions
+
+from state_manager import broadcast_state	# for managing the broadcast state API in a thread-safe manner
 
 # begin python 2/3 compatibility
 try:
@@ -86,6 +95,27 @@ PLUGINS = {} # dictionary of loaded plugins
 
 # /Constants
 
+# Initialize the broadcast state API
+
+broadcast_state.start() # Start the broadcast state API thread
+
+# --- State Manager Plugin Wrappers ---
+def api_update_main(state, media_type, file_path, position, volume=1.0, visible=True):
+	broadcast_state.update_main(state, media_type, file_path, position, volume, visible)
+
+def api_set_override(layer_id, media_type, file_path, position, volume=1.0, visible=True, **kwargs):
+	broadcast_state.set_override(layer_id, media_type, file_path, position, volume, visible, **kwargs)
+
+def api_clear_override(layer_id):
+	broadcast_state.clear_override(layer_id)
+
+def api_set_submedia(layer_id, media_type, file_path, position, volume=1.0, visible=True, **kwargs):
+	broadcast_state.set_submedia(layer_id, media_type, file_path, position, volume, visible, **kwargs)
+
+def api_clear_submedia(layer_id):
+	broadcast_state.clear_submedia(layer_id)
+
+
 # below is the ReferenceDecoder class used to decode the settings file and resolve $ref references within the settings file,
 # allowing for more dynamic and reusable settings structures. It also keeps track of all objects it has decoded in a list 
 # called "references" so that it can search through them when resolving $ref references.
@@ -122,6 +152,27 @@ class ReferenceDecoder(json.JSONDecoder):
 							)
 		return obj
 
+
+def update_ram_state(state, file_path, position):
+    """Atomically write the live player state to the RAM disk."""
+    try:
+        # Python 2.7 uses urllib.quote for URL encoding
+        encoded_path = urllib.quote(file_path) if file_path else ""
+        data = {
+            "state": state,
+            "file": encoded_path,
+            "position": position
+        }
+        
+        tmp_file = "/dev/shm/tv_status.tmp"
+        final_file = "/dev/shm/tv_status.json"
+        
+        with open(tmp_file, "w") as f:
+            json.dump(data, f)
+            
+        os.rename(tmp_file, final_file)
+    except Exception as e:
+        pass # Fail silently so it never crashes the video player
 
 def refresh_plugins():
 	"""
@@ -284,239 +335,228 @@ def report_video_playback(source, vtype="video"):
 	
 
 def play_video(source, commercials, max_commercials_per_break, start_pos, bumpers=None, vtype="video"):
-	"""
-	Play a video file using OMXPlayer on the Raspberry Pi.
-	
-	This is the main video playing experience.
+    """
+    Play a video file using OMXPlayer on the Raspberry Pi.
+    
+    This is the main video playing experience.
 
-	:param source: The path to the video file to be played.
-	:param commercials: A list of commercial break times in seconds.
-	:param max_commercials_per_break: The maximum number of commercials to play during a break.
-	:param start_pos: The position in seconds to start the video from.
-	:param bumpers: A dictionary containing 'in' and 'out' bumper video file paths (optional).
+    :param source: The path to the video file to be played.
+    :param commercials: A list of commercial break times in seconds.
+    :param max_commercials_per_break: The maximum number of commercials to play during a break.
+    :param start_pos: The position in seconds to start the video from.
+    :param bumpers: A dictionary containing 'in' and 'out' bumper video file paths (optional).
 
-	:return: None
-	"""
-	# launches OMXPlayer on the PI to play a video
-	# If commercials are set, 2 instances of the players are loaded: one for the main video and the other for commercials (the main player is hidden during commercial breaks and then made visible again)
-	# 	source: video file to be played
-	# 	commercials: array of times in seconds at which the source video will be interrupt to play commercials
-	#	max_commercials_per_break:
-	#		If set to a number, a random commercial will be continually selected up until the supplied number has been reached
-	#		if an array of commercials video file locations is provided, each commercial will be played until there are none left
-	#	start_pos: attempts to resume the video from this value
-	if os.path.splitext(source)[1].lower() == ".commercials":
-		report_error("PLAY_LOOP", ["Error", "Commercial file supplied as video file. Something aint right...", "SOURCE", str(source)])
-		return 2
+    :return: None
+    """
+    if os.path.splitext(source)[1].lower() == ".commercials":
+        report_error("PLAY_LOOP", ["Error", "Commercial file supplied as video file. Something aint right...", "SOURCE", str(source)])
+        return 2
 
-	global last_played_video_source # the last video/commercial played, used for error reporting
-	comm_source = None # the path to the commercial video file being played
-	if source==None: # if no video file was supplied, we're done here
-		return 2
-	
-	err_pos = 0.0
-	try:
+    global last_played_video_source 
+    comm_source = None 
+    if source==None: 
+        return 2
+    
+    err_pos = 0.0
+    try:
 
-		current_position = 0 # the current position of the main video being played
-		gend_commercials = None # the list of commercials to play during this video, if any
-		
-		if type(max_commercials_per_break) == list: #if a list of commercials was passed instead of a number, set variables
-			gend_commercials = max_commercials_per_break
-			if len(gend_commercials)!=0 and len(commercials)!=0:
-				max_commercials_per_break = spread_division(len(gend_commercials), len(commercials))
-			
-			printd("MAXCOMM: " + ensure_string(max_commercials_per_break))
-		else:
-			if max_commercials_per_break>0:
-				# if we're inserting commercials, let's make sure we can find some
-				comm_source = get_random_commercial()
-				if comm_source == None: 
-					#couldn't find a commercial, so we won't even try to play any during the current video but we should report the error
-					max_commercials_per_break = [] # setting max commercials to 0 and there are no commercials to play, overrides the passed value and disables commercials during this video
-					report_error("PLAY_COMM", ["could not get a random commercial"])
-				else:
-					tmp = max_commercials_per_break
-					max_commercials_per_break = [tmp] * 100
+        current_position = 0 
+        gend_commercials = None 
+        
+        if type(max_commercials_per_break) == list: 
+            gend_commercials = max_commercials_per_break
+            if len(gend_commercials)!=0 and len(commercials)!=0:
+                max_commercials_per_break = spread_division(len(gend_commercials), len(commercials))
+            
+            printd("MAXCOMM: " + ensure_string(max_commercials_per_break))
+        else:
+            if max_commercials_per_break>0:
+                comm_source = get_random_commercial()
+                if comm_source == None: 
+                    max_commercials_per_break = [] 
+                    report_error("PLAY_COMM", ["could not get a random commercial"])
+                else:
+                    tmp = max_commercials_per_break
+                    max_commercials_per_break = [tmp] * 100
 
-		comm_player = None # the OMXPlayer instance for playing commercials
-		
-		print('Main video file:' + ensure_string(source))
-		print("")
+        comm_player = None 
+        
+        print('Main video file:' + ensure_string(source))
+        print("")
 
-		report_video_playback(source, vtype)	# tell web server video we're playing
-		player_args = get_setting(["player_settings"], []) + ["--layer", "1"] # get the player settings from the settings file and add the layer setting for the main video
-		player = OMXPlayer(source, args=player_args, dbus_name="omxplayer.player" + str(random.randint(0,999))) # create the OMXPlayer instance for the main video
-		sleep(0.5) # give the player a moment to load the video
+        report_video_playback(source, vtype)    
+        player_args = get_setting(["player_settings"], []) + ["--layer", "1"] 
+        player = OMXPlayer(source, args=player_args, dbus_name="omxplayer.player" + str(random.randint(0,999))) 
+        sleep(0.5) 
 
-		#player.pause() # pause the video so we can set the position and other settings before playing
-		#player.play() # play the video (it was paused when loaded)
-		
-		player.seek(start_pos) # attempt to resume the video from the supplied position
-		
-		while (1):
-			err_pos = 1.0
-			last_played_video_source = source # set the last played video source to the main video being played
-			try: # get the current position of the main video
-				current_position = player.position()
-			except: # if we can't get the position, the video has probably ended
-				break
-			
-			try:
-				#check to see if commercial times were passed and also check to see if the max commercials allowed is greater than 0
-				if commercials and max_commercials_per_break:
-					# Found a commercial break, play some commercials
-					if current_position > 0 and float(current_position) >= float(commercials[0]):
-						commercials.pop(0)  # Remove the triggered commercial time
+        player.seek(start_pos) 
+        
+        # [API] Register the initial playback state before entering the loop
+        api_update_main(state="playing", media_type=vtype, file_path=source, position=start_pos, visible=True)
 
-						# pause the main video and hide the player from the screen
-						try:
-							player.mute()
-							player.hide_video()
-							player.pause()
-						except Exception:
-							printd("player hide/pause error")
+        while (1):
+            err_pos = 1.0
+            last_played_video_source = source 
+            try: 
+                current_position = player.position()
+                # [API] Update main playhead position
+                api_update_main(state="playing", media_type=vtype, file_path=source, position=current_position, visible=True)
+            except: 
+                break
+            
+            try:
+                if commercials and max_commercials_per_break:
+                    if current_position > 0 and float(current_position) >= float(commercials[0]):
+                        commercials.pop(0)  
 
-						sleep(0.5)
+                        try:
+                            player.mute()
+                            player.hide_video()
+                            player.pause()
 
-						commercials_per_break = [] # the list of commercials to play during this break
-						if bumpers and bumpers.get("out"): # if there are bumpers defined and there are 'OUT' bumpers to play
-							commercials_per_break.append(bumpers["out"].pop(0)) # add the 'OUT' bumpers to the front of the commercials list and remove it from the bumpers list
+                            # [API] Flag main video as paused and hidden
+                            api_update_main(state="paused", media_type=vtype, file_path=source, position=current_position, visible=False)
+                        except Exception:
+                            printd("player hide/pause error")
 
-						# determine how many commercials to play during this break
-						for i in range(0, max_commercials_per_break[0]):
-							# add a commercial to the list of commercials to play during this break
-							commercials_per_break.append(gend_commercials.pop(0) if gend_commercials else get_random_commercial())
+                        sleep(0.5)
 
-						max_commercials_per_break.pop(0) # remove the first item from the list since we've used it
-						
-						if bumpers and bumpers.get("in"): # if there are bumpers defined and there are 'IN' bumpers to play
-							commercials_per_break.append(bumpers["in"].pop(0)) # add the 'IN' bumpers to the end of the commercial list and remove it from the bumpers list
+                        commercials_per_break = [] 
+                        if bumpers and bumpers.get("out"): 
+                            commercials_per_break.append(bumpers["out"].pop(0)) 
 
-						comm_i = len(commercials_per_break) - 1 # set the amount of commercials to play during this break
-						err_pos = 2.0
-						while(comm_i>=0): # loop through and play each commercial in the list
-							try:
-								if gend_commercials == None: # user has set a specific number of commercials per break
-									comm_source = get_random_commercial() # get a random commercial
-									if comm_source==None: # couldn't find a commercial, report the error and skip playing commercials
-										report_error("PLAY_COMM", ["could not get a random commercial"])
-										continue
-								else: # user has chosen to automatically generate the amount of commercials
-									if len(gend_commercials) == 0 and len(commercials_per_break) == 0: # we've run out of commercials to play, so we stop here
-										break
-									else: # get the next commercial from the list of commercials to play during this break
-										comm_source = commercials_per_break.pop(0) # get the next commercial to play and remove it from the list
-										printd("Commercials remaining:", len(commercials_per_break))
+                        for i in range(0, max_commercials_per_break[0]):
+                            commercials_per_break.append(gend_commercials.pop(0) if gend_commercials else get_random_commercial())
 
-								last_played_video_source = comm_source # set the last played video source to the commercial being played
-								print('Playing commercial #' + str(comm_i), comm_source) 
-								print("")
-								# tell web server we're playing a commercial
-								report_video_playback(comm_source, "commercial")
-								# load commercial in the commercial OMXplayer instance
-								if comm_player == None:
-									comm_args = ["--no-osd", "--layer", "2"]
-									comm_player = OMXPlayer(comm_source, args=comm_args, dbus_name="omxplayer.comm_player1")
-									sleep(0.25) # give the player a moment to load the commercial
-								else:
-									comm_player.load(comm_source)
-								
+                        max_commercials_per_break.pop(0) 
+                        
+                        if bumpers and bumpers.get("in"): 
+                            commercials_per_break.append(bumpers["in"].pop(0)) 
 
-								try:
-									comm_player.show_video() # make sure the commercial player is visible
-								except:
-									printd("comm_player show error")
-								
-								# play commercial
-								#comm_player.play()
+                        comm_i = len(commercials_per_break) - 1 
+                        err_pos = 2.0
+                        
+                        while(comm_i>=0): 
+                            try:
+                                if gend_commercials == None: 
+                                    comm_source = get_random_commercial() 
+                                    if comm_source==None: 
+                                        report_error("PLAY_COMM", ["could not get a random commercial"])
+                                        continue
+                                else: 
+                                    if len(gend_commercials) == 0 and len(commercials_per_break) == 0: 
+                                        break
+                                    else: 
+                                        comm_source = commercials_per_break.pop(0) 
+                                        printd("Commercials remaining:", len(commercials_per_break))
 
-								# we need to wait until the commercial has completed
-								# so we'll check for the current position of the video until it triggers an error and we can move on
-								# but just in case we'll also get the length of the commercial, calculate when it should have ended, and move on if that time has been reached
-								comm_length = get_length_from_file(comm_source) 	# get the length of commercial being played
-								comm_start_time = time.time()						# get current time stamp
-								comm_end_time = comm_start_time + comm_length + 1	# calculate at what time the commercial should have ended plus a little buffer (1 second)
-								
-								while (1):
-									if time.time() > comm_end_time: # commercial should be over by now, so we move on
-										print("Commercial should be over by now, moving on...")
-										break
+                                last_played_video_source = comm_source 
+                                print('Playing commercial #' + str(comm_i), comm_source) 
+                                print("")
+                                report_video_playback(comm_source, "commercial")
+                                
+                                if comm_player == None:
+                                    comm_args = ["--no-osd", "--layer", "2"]
+                                    comm_player = OMXPlayer(comm_source, args=comm_args, dbus_name="omxplayer.comm_player1")
+                                    sleep(0.25) 
+                                else:
+                                    comm_player.load(comm_source)
+                                
+                                try:
+                                    comm_player.show_video() 
+                                except:
+                                    printd("comm_player show error")
+                                
+                                comm_length = get_length_from_file(comm_source)     
+                                comm_start_time = time.time()                       
+                                comm_end_time = comm_start_time + comm_length + 1   
+                                
+                                while (1):
+                                    if time.time() > comm_end_time: 
+                                        print("Commercial should be over by now, moving on...")
+                                        break
 
-									# if debug mode is enabled, we don't have to wait for the entire commercial to finish playing
-									if get_setting(['debug'], False) == True and time.time() - comm_start_time > int(get_setting(["debug positon"], 999999, int)):
-										report_debug("COMM_PLAY_LOOP", ["Commercial has been playing for more than " + get_setting(["debug positon"],"-1") + " seconds, ending early"])
-										comm_player.stop()
-										break
-										
-									try: # if we can't get the current position of the commercial, we should break out of the loop and move on
-										comm_position = math.floor(comm_player.position())
-									except:
-										break
-									
-									# sometimes the main player doesn't hide/pause. we should make sure that it does
-									try:
-										if player.is_playing() == True:
-											player.hide_video()
-											player.pause()
-									except:
-											printd("player hide/pause error")
-							except Exception as exce:
-								# if there was an error playing commercials, report it and resume playing main video
-								report_error("COMM_PLAY_LOOP", ["error", ensure_string(exce), "SOURCE", comm_source, traceback.format_exc()])
-							
-							# decrement the amount of remaining commercials
-							comm_i = comm_i - 1
-							sleep(0.5) # give the player a moment to settle down before loading the next commercial
-							
-						# commercial break is over, resume main video
-						player.unmute()
-						player.show_video() # make sure the main video player is visible again
-						player.play() # resume playing the main video
-						
-			except Exception as ecce:
-				# if there was an error playing commercials, report it and resume playing main video
-				report_error("COMM_PLAY", ["Error", ensure_string(ecce), "SOURCE", comm_source, traceback.format_exc()])
-				player.show_video()
-				player.play()
+                                    if get_setting(['debug'], False) == True and time.time() - comm_start_time > int(get_setting(["debug positon"], 999999, int)):
+                                        report_debug("COMM_PLAY_LOOP", ["Commercial has been playing for more than " + get_setting(["debug positon"],"-1") + " seconds, ending early"])
+                                        comm_player.stop()
+                                        break
+                                        
+                                    try: 
+                                        comm_position = math.floor(comm_player.position())
+                                        # [API] Overwrite the commercial block state with the active commercial
+                                        api_set_override(layer_id="commercial_break", media_type="video", file_path=comm_source, position=comm_position, visible=True)
+                                    except:
+                                        break
+                                    
+                                    try:
+                                        if player.is_playing() == True:
+                                            player.hide_video()
+                                            player.pause()
+                                    except:
+                                            printd("player hide/pause error")
+                            except Exception as exce:
+                                report_error("COMM_PLAY_LOOP", ["error", ensure_string(exce), "SOURCE", comm_source, traceback.format_exc()])
+                            
+                            comm_i = comm_i - 1
+                            sleep(0.5) 
+                            
+                        # [API] Break is over, clear the override so the web player resumes the main feed
+                        api_clear_override("commercial_break")
+                        
+                        player.unmute()
+                        player.show_video() 
+                        player.play() 
+                        
+            except Exception as ecce:
+                report_error("COMM_PLAY", ["Error", ensure_string(ecce), "SOURCE", comm_source, traceback.format_exc()])
+                # [API] Ensure the override is cleared even if the commercial block crashed
+                api_clear_override("commercial_break")
+                
+                player.show_video()
+                player.play()
 
+        err_pos = 7.0
+        player.hide_video()
+        
+        # [API] Video ended naturally
+        api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False) 
+        sleep(0.5)
+        
+    except Exception as e:
+        if(err_pos!=7.0):
+            report_error("PLAY_LOOP", ["Error", ensure_string(e), "SOURCE", ensure_string(source), traceback.format_exc()])
+            
+        # [API] Video crashed or failed
+        api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False) 
+        api_clear_override("commercial_break") # Failsafe clear
+        
+        kill_omxplayer()
+        try:
+            if comm_player != None:
+                comm_player.quit()
+        except Exception as ex:
+            printd("error comm quit " + ensure_string(ex))
+        try:
+            if player != None:
+                player.quit()
+        except Exception as exx:
+            printd("error player quit " + ensure_string(exx))
+        
+        if(err_pos!=7.0):
+            return 0 
 
-		err_pos = 7.0
-		#main video has ended
-		player.hide_video()
-		sleep(0.5)
-	except Exception as e:
-		if(err_pos!=7.0):
-			report_error("PLAY_LOOP", ["Error", ensure_string(e), "SOURCE", ensure_string(source), traceback.format_exc()])
-			
-		
-		#kill all omxplayer instances since there was problem with the main video.
-		kill_omxplayer()
-		try:
-			if comm_player != None:
-				comm_player.quit()
-		except Exception as ex:
-			printd("error comm quit " + ensure_string(ex))
-		try:
-			if player != None:
-				player.quit()
-		except Exception as exx:
-			printd("error player quit " + ensure_string(exx))
-		
-		if(err_pos!=7.0):
-			return 0 #(err_pos, source, current_position)
-
-	try:
-		if comm_player != None:
-			comm_player.quit()
-	except Exception as ex:
-		report_error("COMM_quit", ["Position", ensure_string(err_pos), "Error", ensure_string(ex)])
-	try:
-		if player != None:
-			player.quit()
-	except Exception as exx:
-		report_error("PLAY_quit",["Position", ensure_string(err_pos), "Error", ensure_string(exx)])
-	
-	return 1
+    try:
+        if comm_player != None:
+            comm_player.quit()
+    except Exception as ex:
+        report_error("COMM_quit", ["Position", ensure_string(err_pos), "Error", ensure_string(ex)])
+    try:
+        if player != None:
+            player.quit()
+    except Exception as exx:
+        report_error("PLAY_quit",["Position", ensure_string(err_pos), "Error", ensure_string(exx)])
+    
+    return 1
 
 def ensure_string(value):
 	"""
@@ -2832,7 +2872,6 @@ def onStartup():
 			report_error("WORKER_TIMEOUT", [worker_path, "No response from local server"])
 
 onStartup() # Call the onStartup function to report that the script has started
-
 
 while True:
 	try:
