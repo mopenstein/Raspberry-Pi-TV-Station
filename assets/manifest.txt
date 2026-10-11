@@ -59,10 +59,10 @@ sync:workers/trim_played_by_most_recent.php->/var/www/html/workers/trim_played_b
 # Optional Template Themes Updates
 ifsync:webui/templates/source/windows/windows.php->/var/www/html/templates/windows.php
 ifsync:webui/templates/source/windows/windows.preview.png->/var/www/html/templates/windows.preview.png
-ifsync:webui/templates/source/windows/broadcast.php->/var/www/html/templates/broadcast.php
-ifsync:webui/templates/source/windows/broadcast.preview.png->/var/www/html/templates/broadcast.preview.png
-ifsync:webui/templates/source/windows/niteowl.php->/var/www/html/templates/niteowl.php
-ifsync:webui/templates/source/windows/niteowl.preview.png->/var/www/html/templates/niteowl.preview.png
+ifsync:webui/templates/source/broadcast/broadcast.php->/var/www/html/templates/broadcast.php
+ifsync:webui/templates/source/broadcast/broadcast.preview.png->/var/www/html/templates/broadcast.preview.png
+ifsync:webui/templates/source/niteowl/niteowl.php->/var/www/html/templates/niteowl.php
+ifsync:webui/templates/source/niteowl/niteowl.preview.png->/var/www/html/templates/niteowl.preview.png
 
 # Optional Plugin Updates
 ifsync:plugins/source/pip/picture-in-picture.py->/home/pi/Desktop/plugins/picture-in-picture.py
