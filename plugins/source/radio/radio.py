@@ -1,20 +1,18 @@
 # MetaData
 #
 # name: Radio Station Plugin
-# version: 0.1
-# version date: 2026.02.09
+# version: 0.2
+# version date: 2026.10.10
 #
 # description: A plugin to handle radio playback keywords \
 #	"audio" - plays a random audio file from a specified folder \
-#	"radio" - plays a radio program based on a specified format with support for random, balanced, and ordered playback
+#	"radio" - plays a radio program based on a specified format with support for random, balanced, and ordered playback. \
+#   Integrates with state_manager API for synchronized web playback of main tracks, commercials, and audio beds.
 #
 # EndMetaData
 #
 #
 # Must be placed in the plugins directory specified in settings.json
-
-
-
 
 from dbus.exceptions import DBusException
 from omxplayer import OMXPlayer # the video player
@@ -28,17 +26,23 @@ import traceback				# for error reporting
 import os
 import random
 
-AUDIO_EXTENSIONS = ('mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'wma')	# audio file extensions that are considered valid audio files
+AUDIO_EXTENSIONS = ('mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'wma')
 
-# registered keywords that this plugin can handle
 keywords = ["audio", "radio"]
 
-# functions that the main program must provide
-requested_functions = ["printd", "open_url", "get_setting", "report_error", "eval_equation", "report_file_not_found", "report_debug", "report_video_playback", "get_length_from_file", "kill_omxplayer", "ensure_string", "get_folders_from_dir", "get_files_from_dir", "weighted_random_choice", "replace_all_special_words", "get_videos_from_dir_cached", "is_special_time"]
+# Added state_manager API wrappers to the injection request
+requested_functions = [
+    "printd", "open_url", "get_setting", "report_error", "eval_equation", 
+    "report_file_not_found", "report_debug", "report_video_playback", 
+    "get_length_from_file", "kill_omxplayer", "ensure_string", 
+    "get_folders_from_dir", "get_files_from_dir", "weighted_random_choice", 
+    "replace_all_special_words", "get_videos_from_dir_cached", "is_special_time",
+    "api_update_main", "api_set_override", "api_clear_override",
+    "api_set_submedia", "api_clear_submedia"
+]
 
-functions = {} # functions passed from main program to plugin 
-
-global_settings = {} # settings passed from main program
+functions = {} 
+global_settings = {} 
 
 def register(name, func):
 	global functions
@@ -53,35 +57,19 @@ def load(settings):
 	global_settings = settings
 
 def check_paths(format_paths):
-	"""
-	Checks format_paths and returns:
-	- string unchanged if input is a string
-	- list unchanged if input is a list of strings
-	- 'name' (string or list) if input is a list of dicts and conditions pass
+	if isinstance(format_paths, basestring):  
+		return functions["replace_all_special_words"](format_paths) 
 
-	:param format_paths: string, list of strings, or list of dicts
-	:return: string, list of strings, or None
-	"""
-
-	# case 1: single string
-	if isinstance(format_paths, basestring):  # Python 2 safe
-		return functions["replace_all_special_words"](format_paths) # return path with special words replaced
-
-	# case 2: list
 	if isinstance(format_paths, list):
-		# if all entries are strings return list unchanged
 		if all(isinstance(entry, basestring) for entry in format_paths):
-			#return format_paths
-			return [functions["replace_all_special_words"](entry) for entry in format_paths] # return list with special words replaced
+			return [functions["replace_all_special_words"](entry) for entry in format_paths] 
 
-		# if entries are dicts check each until one passes
 		for entry in format_paths:
 			if isinstance(entry, dict):
 				name = entry.get("name")
 				if not name:
 					continue
 
-				# special condition
 				if "special" in entry and not functions["is_special_time"](entry["special"]):
 					continue
 
@@ -92,13 +80,9 @@ def check_paths(format_paths):
 					if chance_rnd > float(chance_eval):
 						continue
 
-				# all conditions passed return name (string or list)
 				return functions["replace_all_special_words"](name)
 
-		# no dict passed
 		return None
-
-	# fallback
 	return None
 
 def handle(keyword, programming_schedule):
@@ -106,26 +90,28 @@ def handle(keyword, programming_schedule):
 	global functions
 	global global_settings
 	global AUDIO_EXTENSIONS
+	
 	if keyword not in keywords:
 		functions["printd"]("Keyword", keyword, "not registered in plugin.")
 		return [False, None]
 
 	if keyword == "audio":
 		functions["printd"]("Handling keyword", keyword, "in plugin.")
-		folders = programming_schedule[0] # returns all subfolders of a directory
+		folders = programming_schedule[0] 
 		functions["printd"]("Selected folder for audio playback:", folders)
-		selfolder = functions["replace_all_special_words"](random.choice(folders)) # choose a random one
+		selfolder = functions["replace_all_special_words"](random.choice(folders)) 
 		functions["printd"]("Selected folder for audio playback:", selfolder)
-		files = functions["get_files_from_dir"](selfolder, AUDIO_EXTENSIONS) # preload all the files in that directory
-		source = random.choice(files) # choose a random file from that directory
+		files = functions["get_files_from_dir"](selfolder, AUDIO_EXTENSIONS) 
+		source = random.choice(files) 
 
 		if not files:
 			functions["printd"]("No audio files found in folder:", selfolder)
 			functions["report_error"]("RADIO PLAYBACK ERROR", ["No audio files found in folder:", selfolder])
 			return [True, None]
 
-		play_file(source) # play the audio file
+		play_file(source) 
 		return [True, source]
+        
 	elif keyword == "radio":
 		functions["printd"]("Handling keyword", keyword, "in plugin.")
 
@@ -171,11 +157,12 @@ def handle(keyword, programming_schedule):
 				cut = 3
 				weights = None
 
-			format_paths = check_paths(format_paths) # process special conditions
+			format_paths = check_paths(format_paths) 
 			functions["printd"]("bed files before check_paths:", bed_folder_name)
-			if bed_folder_name: # process bed files if specified
+			if bed_folder_name: 
 				bed_folder_name = check_paths(bed_folder_name)
 			functions["printd"]("bed files after check_paths:", bed_folder_name)
+			
 			if not isinstance(format_paths, list) and not isinstance(format_paths, basestring):
 				functions["printd"]("Invalid format path type skipping:", format_paths)
 				continue
@@ -194,8 +181,6 @@ def handle(keyword, programming_schedule):
 				else:
 					selected_dir = format_paths
 
-				#selected_folder = base_folder + "/" + selected_dir + "/"
-				# if first character is @, we do not use the base_folder. We trim the @ and use the rest as absolute path
 				if selected_dir[0:1] == "@":
 					selected_dir = selected_dir[1:]
 					selected_folder = selected_dir + "/"
@@ -225,7 +210,7 @@ def handle(keyword, programming_schedule):
 							functions["report_error"]("RADIO PLAYBACK ERROR", ["Malformed response from server", urlcontents])
 							break
 
-						if first_time == "0": # indicates no valid file found
+						if first_time == "0": 
 							functions["printd"]("Backend failed to return a valid file:", comment)
 							functions["report_error"]("RADIO PLAYBACK ERROR", ["No valid file found", comment, programming_schedule[4]])
 							return [True, None]
@@ -334,7 +319,7 @@ def handle(keyword, programming_schedule):
 
 		return [True, source]
 
-players = []			# List of OMXPlayer instances
+players = []			
 player_count = 0
 
 def kill_players():
@@ -355,8 +340,6 @@ def kill_players():
 		except Exception as outer:
 			functions["printd"]("Failed to pop player:", str(outer))
 
-import threading
-
 def play_file(source, vtype="video", end_early=0, stop_at=-1, blocking=True):
 	global players, functions, global_settings, player_count
 
@@ -367,6 +350,10 @@ def play_file(source, vtype="video", end_early=0, stop_at=-1, blocking=True):
 		functions["printd"]("Source file does not exist:", source)
 		functions["report_error"]("RADIO PLAYBACK ERROR", ["Source file missing", "SOURCE", source])
 		return False
+
+    # --- API Classification ---
+	is_bed = not blocking
+	is_comm = (vtype == "commercial" and blocking)
 
 	try:
 		duration = functions["get_length_from_file"](source)
@@ -396,6 +383,19 @@ def play_file(source, vtype="video", end_early=0, stop_at=-1, blocking=True):
 		time.sleep(2)
 		functions["printd"](datetime.now().strftime("%H:%M:%S"), "DBus is ready.")
 
+        # --- Initial API Registration ---
+        # Passing visible=False ensures the web player's <video> tags play the audio payload 
+        # seamlessly without rendering a black UI box over the CRT / guide background.
+		if is_bed:
+			if "api_set_submedia" in functions:
+				functions["api_set_submedia"](layer_id="radio_bed", media_type="audio", file_path=source, position=0.0, visible=False)
+		elif is_comm:
+			if "api_set_override" in functions:
+				functions["api_set_override"](layer_id="commercial_break", media_type="audio", file_path=source, position=0.0, visible=False)
+		else:
+			if "api_update_main" in functions:
+				functions["api_update_main"](state="playing", media_type="audio", file_path=source, position=0.0, visible=False)
+
 		if not blocking:
 			if stop_at > 0:
 				def delayed_stop(p, delay):
@@ -405,18 +405,29 @@ def play_file(source, vtype="video", end_early=0, stop_at=-1, blocking=True):
 						functions["printd"]("Non-blocking player stopped after", delay, "seconds")
 					except:
 						pass
+					finally:
+                        # --- Background API Cleanup ---
+						if "api_clear_submedia" in functions:
+							functions["api_clear_submedia"]("radio_bed")
 				threading.Thread(target=delayed_stop, args=(player, stop_at)).start()
 			return True
 
 		last_position = [0, 0]
 		while True:
 			try:
-				# this a hack to catch occasional position errors from omxplayer
 				try:
 					position = player.position()
 				except:
 					functions["printd"]("Player position retrieval failed, assuming playback ended.")
 					break
+
+                # --- API Playhead Sync ---
+				if is_comm:
+					if "api_set_override" in functions:
+						functions["api_set_override"](layer_id="commercial_break", media_type="audio", file_path=source, position=position, visible=False)
+				else:
+					if "api_update_main" in functions:
+						functions["api_update_main"](state="playing", media_type="audio", file_path=source, position=position, visible=False)
 
 				functions["printd"](datetime.now().strftime("%H:%M:%S"), "Position:", position, "Duration:", duration)
 				if functions["get_setting"](["debug"], False) and position > int(functions["get_setting"](["debug positon"], 9999999)):
@@ -438,9 +449,26 @@ def play_file(source, vtype="video", end_early=0, stop_at=-1, blocking=True):
 			last_position = [position, last_position[1] + 1]
 			sleep(1)
 
+        # --- API Cleanup ---
+		if is_comm:
+			if "api_clear_override" in functions:
+				functions["api_clear_override"]("commercial_break")
+		else:
+			if "api_update_main" in functions:
+				functions["api_update_main"](state="offline", media_type="audio", file_path="", position=0.0, visible=False)
+
 		return True
 	except Exception as e:
 		functions["kill_omxplayer"]()
 		functions["report_error"]("RADIO PLAYBACK ERROR", ["SOURCE", source, str(e), traceback.format_exc()])
 		functions["printd"]("Playback error:", str(e))
+		
+        # --- Failsafe API Cleanup ---
+		if 'is_comm' in locals() and is_comm:
+			if "api_clear_override" in functions:
+				functions["api_clear_override"]("commercial_break")
+		else:
+			if "api_update_main" in functions:
+				functions["api_update_main"](state="offline", media_type="audio", file_path="", position=0.0, visible=False)
+                
 		return False
