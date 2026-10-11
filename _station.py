@@ -1,8 +1,9 @@
 #!/usr/bin/python
 # version: 102.31
-# version date: 2026.09.22
+# version date: 2026.10.10
 #
 #	Migrating to _station.py from _rnd80s.py
+#	If loading plugins fails, the script will now exit with an error code instead of continuing to run.
 #	Fixed ownership issues with cache
 #	Implemented a broadcast state management API to allow for thread-safe access to the current state of the video player from remote sources (e.g., web server)
 #	Added new wrapper functions for state management api:
@@ -14,7 +15,7 @@
 #
 # settings version: 0.996
 #
-#
+#	no changes
 
 
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
@@ -44,21 +45,21 @@ from state_manager import broadcast_state	# for managing the broadcast state API
 
 # begin python 2/3 compatibility
 try:
-    # Python 3
-    import urllib.request as urllib2
-    import urllib.parse as urllib
-    from urllib.parse import quote_plus, urlencode
+	# Python 3
+	import urllib.request as urllib2
+	import urllib.parse as urllib
+	from urllib.parse import quote_plus, urlencode
 except ImportError:
-    # Python 2
-    import urllib2
-    import urllib
-    from urllib import quote_plus, urlencode
+	# Python 2
+	import urllib2
+	import urllib
+	from urllib import quote_plus, urlencode
 
 # Compatibility shims for string types
 if sys.version_info[0] >= 3:
-    unicode = str
-    basestring = str
-    long = int
+	unicode = str
+	basestring = str
+	long = int
 
 # Constants
 
@@ -71,17 +72,17 @@ VIDEO_EXTENSIONS = ('mp4', 'avi', 'webm', 'mpeg', 'm4v', 'mkv', 'mov', 'flv', 'w
 
 # Allowed AST nodes for safe evaluation of mathematical expressions
 ALLOWED_AST_NODES = (
-    ast.Expression,
-    ast.BinOp,        # +, -, *, /, %
-    ast.UnaryOp,      # -x, +x
-    ast.operator,     # Add, Sub, Mult, Div, etc.
-    ast.unaryop,      # USub, UAdd
-    ast.Num,          # Python 2 numbers (int, float)
-    ast.Name,         # variable lookups like 'hour', 'day'
-    ast.Call,         # function calls like sin(), clamp()
-    ast.Compare,      # ==, !=, <, >, <=, >=
-    ast.cmpop,        # comparison operators
-    ast.IfExp,        # ternary 'x if cond else y'
+	ast.Expression,
+	ast.BinOp,		# +, -, *, /, %
+	ast.UnaryOp,	  # -x, +x
+	ast.operator,	 # Add, Sub, Mult, Div, etc.
+	ast.unaryop,	  # USub, UAdd
+	ast.Num,		  # Python 2 numbers (int, float)
+	ast.Name,		 # variable lookups like 'hour', 'day'
+	ast.Call,		 # function calls like sin(), clamp()
+	ast.Compare,	  # ==, !=, <, >, <=, >=
+	ast.cmpop,		# comparison operators
+	ast.IfExp,		# ternary 'x if cond else y'
 )
 
 
@@ -154,25 +155,25 @@ class ReferenceDecoder(json.JSONDecoder):
 
 
 def update_ram_state(state, file_path, position):
-    """Atomically write the live player state to the RAM disk."""
-    try:
-        # Python 2.7 uses urllib.quote for URL encoding
-        encoded_path = urllib.quote(file_path) if file_path else ""
-        data = {
-            "state": state,
-            "file": encoded_path,
-            "position": position
-        }
-        
-        tmp_file = "/dev/shm/tv_status.tmp"
-        final_file = "/dev/shm/tv_status.json"
-        
-        with open(tmp_file, "w") as f:
-            json.dump(data, f)
-            
-        os.rename(tmp_file, final_file)
-    except Exception as e:
-        pass # Fail silently so it never crashes the video player
+	"""Atomically write the live player state to the RAM disk."""
+	try:
+		# Python 2.7 uses urllib.quote for URL encoding
+		encoded_path = urllib.quote(file_path) if file_path else ""
+		data = {
+			"state": state,
+			"file": encoded_path,
+			"position": position
+		}
+		
+		tmp_file = "/dev/shm/tv_status.tmp"
+		final_file = "/dev/shm/tv_status.json"
+		
+		with open(tmp_file, "w") as f:
+			json.dump(data, f)
+			
+		os.rename(tmp_file, final_file)
+	except Exception as e:
+		pass # Fail silently so it never crashes the video player
 
 def refresh_plugins():
 	"""
@@ -203,6 +204,8 @@ def import_module_from_path(name, path):
 		import imp
 		return imp.load_source(name, path)
 
+import sys
+
 def load_plugins(plugin_dir):
 	"""
 	Loads plugins from the specified directory.
@@ -219,15 +222,15 @@ def load_plugins(plugin_dir):
 			path = os.path.join(plugin_dir, filename)
 
 			try:
-
 				module = import_module_from_path(name, path)
 
 				if not hasattr(module, "handle") or not callable(module.handle):
-					report_error("PLUGIN_LOAD", [name, "missing required 'handle' function. Skipping."])
-					continue
+					report_error("PLUGIN_LOAD", [name, "missing required 'handle' function."])
+					sys.exit(f"Exiting script: Halted because plugin '{name}' is missing the required 'handle' function.")
+				
 				if not hasattr(module, "keywords") or not isinstance(module.keywords, list):
-					report_error("PLUGIN_LOAD", [name, "missing required 'keywords' list. Skipping."])
-					continue
+					report_error("PLUGIN_LOAD", [name, "missing required 'keywords' list."])
+					sys.exit(f"Exiting script: Halted because plugin '{name}' is missing the required 'keywords' list.")
 
 				PLUGINS[name] = module
 
@@ -246,6 +249,8 @@ def load_plugins(plugin_dir):
 			except Exception as e:
 				print("Failed to load", name, "-", str(e))
 				report_error("PLUGIN_LOAD", [name, str(e), traceback.format_exc()])
+				print("Exiting script: Halted due to a critical failure in plugin '" + name + "'. Please check the error log for details.")
+				sys.exit(1)  # Exit the script with an error code
 
 def wait_for_plugins(plugin_dir, timeout=30):
 	"""
@@ -335,228 +340,228 @@ def report_video_playback(source, vtype="video"):
 	
 
 def play_video(source, commercials, max_commercials_per_break, start_pos, bumpers=None, vtype="video"):
-    """
-    Play a video file using OMXPlayer on the Raspberry Pi.
-    
-    This is the main video playing experience.
+	"""
+	Play a video file using OMXPlayer on the Raspberry Pi.
+	
+	This is the main video playing experience.
 
-    :param source: The path to the video file to be played.
-    :param commercials: A list of commercial break times in seconds.
-    :param max_commercials_per_break: The maximum number of commercials to play during a break.
-    :param start_pos: The position in seconds to start the video from.
-    :param bumpers: A dictionary containing 'in' and 'out' bumper video file paths (optional).
+	:param source: The path to the video file to be played.
+	:param commercials: A list of commercial break times in seconds.
+	:param max_commercials_per_break: The maximum number of commercials to play during a break.
+	:param start_pos: The position in seconds to start the video from.
+	:param bumpers: A dictionary containing 'in' and 'out' bumper video file paths (optional).
 
-    :return: None
-    """
-    if os.path.splitext(source)[1].lower() == ".commercials":
-        report_error("PLAY_LOOP", ["Error", "Commercial file supplied as video file. Something aint right...", "SOURCE", str(source)])
-        return 2
+	:return: None
+	"""
+	if os.path.splitext(source)[1].lower() == ".commercials":
+		report_error("PLAY_LOOP", ["Error", "Commercial file supplied as video file. Something aint right...", "SOURCE", str(source)])
+		return 2
 
-    global last_played_video_source 
-    comm_source = None 
-    if source==None: 
-        return 2
-    
-    err_pos = 0.0
-    try:
+	global last_played_video_source 
+	comm_source = None 
+	if source==None: 
+		return 2
+	
+	err_pos = 0.0
+	try:
 
-        current_position = 0 
-        gend_commercials = None 
-        
-        if type(max_commercials_per_break) == list: 
-            gend_commercials = max_commercials_per_break
-            if len(gend_commercials)!=0 and len(commercials)!=0:
-                max_commercials_per_break = spread_division(len(gend_commercials), len(commercials))
-            
-            printd("MAXCOMM: " + ensure_string(max_commercials_per_break))
-        else:
-            if max_commercials_per_break>0:
-                comm_source = get_random_commercial()
-                if comm_source == None: 
-                    max_commercials_per_break = [] 
-                    report_error("PLAY_COMM", ["could not get a random commercial"])
-                else:
-                    tmp = max_commercials_per_break
-                    max_commercials_per_break = [tmp] * 100
+		current_position = 0 
+		gend_commercials = None 
+		
+		if type(max_commercials_per_break) == list: 
+			gend_commercials = max_commercials_per_break
+			if len(gend_commercials)!=0 and len(commercials)!=0:
+				max_commercials_per_break = spread_division(len(gend_commercials), len(commercials))
+			
+			printd("MAXCOMM: " + ensure_string(max_commercials_per_break))
+		else:
+			if max_commercials_per_break>0:
+				comm_source = get_random_commercial()
+				if comm_source == None: 
+					max_commercials_per_break = [] 
+					report_error("PLAY_COMM", ["could not get a random commercial"])
+				else:
+					tmp = max_commercials_per_break
+					max_commercials_per_break = [tmp] * 100
 
-        comm_player = None 
-        
-        print('Main video file:' + ensure_string(source))
-        print("")
+		comm_player = None 
+		
+		print('Main video file:' + ensure_string(source))
+		print("")
 
-        report_video_playback(source, vtype)    
-        player_args = get_setting(["player_settings"], []) + ["--layer", "1"] 
-        player = OMXPlayer(source, args=player_args, dbus_name="omxplayer.player" + str(random.randint(0,999))) 
-        sleep(0.5) 
+		report_video_playback(source, vtype)	
+		player_args = get_setting(["player_settings"], []) + ["--layer", "1"] 
+		player = OMXPlayer(source, args=player_args, dbus_name="omxplayer.player" + str(random.randint(0,999))) 
+		sleep(0.5) 
 
-        player.seek(start_pos) 
-        
-        # [API] Register the initial playback state before entering the loop
-        api_update_main(state="playing", media_type=vtype, file_path=source, position=start_pos, visible=True)
+		player.seek(start_pos) 
+		
+		# [API] Register the initial playback state before entering the loop
+		api_update_main(state="playing", media_type=vtype, file_path=source, position=start_pos, visible=True)
 
-        while (1):
-            err_pos = 1.0
-            last_played_video_source = source 
-            try: 
-                current_position = player.position()
-                # [API] Update main playhead position
-                api_update_main(state="playing", media_type=vtype, file_path=source, position=current_position, visible=True)
-            except: 
-                break
-            
-            try:
-                if commercials and max_commercials_per_break:
-                    if current_position > 0 and float(current_position) >= float(commercials[0]):
-                        commercials.pop(0)  
+		while (1):
+			err_pos = 1.0
+			last_played_video_source = source 
+			try: 
+				current_position = player.position()
+				# [API] Update main playhead position
+				api_update_main(state="playing", media_type=vtype, file_path=source, position=current_position, visible=True)
+			except: 
+				break
+			
+			try:
+				if commercials and max_commercials_per_break:
+					if current_position > 0 and float(current_position) >= float(commercials[0]):
+						commercials.pop(0)  
 
-                        try:
-                            player.mute()
-                            player.hide_video()
-                            player.pause()
+						try:
+							player.mute()
+							player.hide_video()
+							player.pause()
 
-                            # [API] Flag main video as paused and hidden
-                            api_update_main(state="paused", media_type=vtype, file_path=source, position=current_position, visible=False)
-                        except Exception:
-                            printd("player hide/pause error")
+							# [API] Flag main video as paused and hidden
+							api_update_main(state="paused", media_type=vtype, file_path=source, position=current_position, visible=False)
+						except Exception:
+							printd("player hide/pause error")
 
-                        sleep(0.5)
+						sleep(0.5)
 
-                        commercials_per_break = [] 
-                        if bumpers and bumpers.get("out"): 
-                            commercials_per_break.append(bumpers["out"].pop(0)) 
+						commercials_per_break = [] 
+						if bumpers and bumpers.get("out"): 
+							commercials_per_break.append(bumpers["out"].pop(0)) 
 
-                        for i in range(0, max_commercials_per_break[0]):
-                            commercials_per_break.append(gend_commercials.pop(0) if gend_commercials else get_random_commercial())
+						for i in range(0, max_commercials_per_break[0]):
+							commercials_per_break.append(gend_commercials.pop(0) if gend_commercials else get_random_commercial())
 
-                        max_commercials_per_break.pop(0) 
-                        
-                        if bumpers and bumpers.get("in"): 
-                            commercials_per_break.append(bumpers["in"].pop(0)) 
+						max_commercials_per_break.pop(0) 
+						
+						if bumpers and bumpers.get("in"): 
+							commercials_per_break.append(bumpers["in"].pop(0)) 
 
-                        comm_i = len(commercials_per_break) - 1 
-                        err_pos = 2.0
-                        
-                        while(comm_i>=0): 
-                            try:
-                                if gend_commercials == None: 
-                                    comm_source = get_random_commercial() 
-                                    if comm_source==None: 
-                                        report_error("PLAY_COMM", ["could not get a random commercial"])
-                                        continue
-                                else: 
-                                    if len(gend_commercials) == 0 and len(commercials_per_break) == 0: 
-                                        break
-                                    else: 
-                                        comm_source = commercials_per_break.pop(0) 
-                                        printd("Commercials remaining:", len(commercials_per_break))
+						comm_i = len(commercials_per_break) - 1 
+						err_pos = 2.0
+						
+						while(comm_i>=0): 
+							try:
+								if gend_commercials == None: 
+									comm_source = get_random_commercial() 
+									if comm_source==None: 
+										report_error("PLAY_COMM", ["could not get a random commercial"])
+										continue
+								else: 
+									if len(gend_commercials) == 0 and len(commercials_per_break) == 0: 
+										break
+									else: 
+										comm_source = commercials_per_break.pop(0) 
+										printd("Commercials remaining:", len(commercials_per_break))
 
-                                last_played_video_source = comm_source 
-                                print('Playing commercial #' + str(comm_i), comm_source) 
-                                print("")
-                                report_video_playback(comm_source, "commercial")
-                                
-                                if comm_player == None:
-                                    comm_args = ["--no-osd", "--layer", "2"]
-                                    comm_player = OMXPlayer(comm_source, args=comm_args, dbus_name="omxplayer.comm_player1")
-                                    sleep(0.25) 
-                                else:
-                                    comm_player.load(comm_source)
-                                
-                                try:
-                                    comm_player.show_video() 
-                                except:
-                                    printd("comm_player show error")
-                                
-                                comm_length = get_length_from_file(comm_source)     
-                                comm_start_time = time.time()                       
-                                comm_end_time = comm_start_time + comm_length + 1   
-                                
-                                while (1):
-                                    if time.time() > comm_end_time: 
-                                        print("Commercial should be over by now, moving on...")
-                                        break
+								last_played_video_source = comm_source 
+								print('Playing commercial #' + str(comm_i), comm_source) 
+								print("")
+								report_video_playback(comm_source, "commercial")
+								
+								if comm_player == None:
+									comm_args = ["--no-osd", "--layer", "2"]
+									comm_player = OMXPlayer(comm_source, args=comm_args, dbus_name="omxplayer.comm_player1")
+									sleep(0.25) 
+								else:
+									comm_player.load(comm_source)
+								
+								try:
+									comm_player.show_video() 
+								except:
+									printd("comm_player show error")
+								
+								comm_length = get_length_from_file(comm_source)	 
+								comm_start_time = time.time()					   
+								comm_end_time = comm_start_time + comm_length + 1   
+								
+								while (1):
+									if time.time() > comm_end_time: 
+										print("Commercial should be over by now, moving on...")
+										break
 
-                                    if get_setting(['debug'], False) == True and time.time() - comm_start_time > int(get_setting(["debug positon"], 999999, int)):
-                                        report_debug("COMM_PLAY_LOOP", ["Commercial has been playing for more than " + get_setting(["debug positon"],"-1") + " seconds, ending early"])
-                                        comm_player.stop()
-                                        break
-                                        
-                                    try: 
-                                        comm_position = math.floor(comm_player.position())
-                                        # [API] Overwrite the commercial block state with the active commercial
-                                        api_set_override(layer_id="commercial_break", media_type="video", file_path=comm_source, position=comm_position, visible=True)
-                                    except:
-                                        break
-                                    
-                                    try:
-                                        if player.is_playing() == True:
-                                            player.hide_video()
-                                            player.pause()
-                                    except:
-                                            printd("player hide/pause error")
-                            except Exception as exce:
-                                report_error("COMM_PLAY_LOOP", ["error", ensure_string(exce), "SOURCE", comm_source, traceback.format_exc()])
-                            
-                            comm_i = comm_i - 1
-                            sleep(0.5) 
-                            
-                        # [API] Break is over, clear the override so the web player resumes the main feed
-                        api_clear_override("commercial_break")
-                        
-                        player.unmute()
-                        player.show_video() 
-                        player.play() 
-                        
-            except Exception as ecce:
-                report_error("COMM_PLAY", ["Error", ensure_string(ecce), "SOURCE", comm_source, traceback.format_exc()])
-                # [API] Ensure the override is cleared even if the commercial block crashed
-                api_clear_override("commercial_break")
-                
-                player.show_video()
-                player.play()
+									if get_setting(['debug'], False) == True and time.time() - comm_start_time > int(get_setting(["debug positon"], 999999, int)):
+										report_debug("COMM_PLAY_LOOP", ["Commercial has been playing for more than " + get_setting(["debug positon"],"-1") + " seconds, ending early"])
+										comm_player.stop()
+										break
+										
+									try: 
+										comm_position = math.floor(comm_player.position())
+										# [API] Overwrite the commercial block state with the active commercial
+										api_set_override(layer_id="commercial_break", media_type="video", file_path=comm_source, position=comm_position, visible=True)
+									except:
+										break
+									
+									try:
+										if player.is_playing() == True:
+											player.hide_video()
+											player.pause()
+									except:
+											printd("player hide/pause error")
+							except Exception as exce:
+								report_error("COMM_PLAY_LOOP", ["error", ensure_string(exce), "SOURCE", comm_source, traceback.format_exc()])
+							
+							comm_i = comm_i - 1
+							sleep(0.5) 
+							
+						# [API] Break is over, clear the override so the web player resumes the main feed
+						api_clear_override("commercial_break")
+						
+						player.unmute()
+						player.show_video() 
+						player.play() 
+						
+			except Exception as ecce:
+				report_error("COMM_PLAY", ["Error", ensure_string(ecce), "SOURCE", comm_source, traceback.format_exc()])
+				# [API] Ensure the override is cleared even if the commercial block crashed
+				api_clear_override("commercial_break")
+				
+				player.show_video()
+				player.play()
 
-        err_pos = 7.0
-        player.hide_video()
-        
-        # [API] Video ended naturally
-        api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False) 
-        sleep(0.5)
-        
-    except Exception as e:
-        if(err_pos!=7.0):
-            report_error("PLAY_LOOP", ["Error", ensure_string(e), "SOURCE", ensure_string(source), traceback.format_exc()])
-            
-        # [API] Video crashed or failed
-        api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False) 
-        api_clear_override("commercial_break") # Failsafe clear
-        
-        kill_omxplayer()
-        try:
-            if comm_player != None:
-                comm_player.quit()
-        except Exception as ex:
-            printd("error comm quit " + ensure_string(ex))
-        try:
-            if player != None:
-                player.quit()
-        except Exception as exx:
-            printd("error player quit " + ensure_string(exx))
-        
-        if(err_pos!=7.0):
-            return 0 
+		err_pos = 7.0
+		player.hide_video()
+		
+		# [API] Video ended naturally
+		api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False) 
+		sleep(0.5)
+		
+	except Exception as e:
+		if(err_pos!=7.0):
+			report_error("PLAY_LOOP", ["Error", ensure_string(e), "SOURCE", ensure_string(source), traceback.format_exc()])
+			
+		# [API] Video crashed or failed
+		api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False) 
+		api_clear_override("commercial_break") # Failsafe clear
+		
+		kill_omxplayer()
+		try:
+			if comm_player != None:
+				comm_player.quit()
+		except Exception as ex:
+			printd("error comm quit " + ensure_string(ex))
+		try:
+			if player != None:
+				player.quit()
+		except Exception as exx:
+			printd("error player quit " + ensure_string(exx))
+		
+		if(err_pos!=7.0):
+			return 0 
 
-    try:
-        if comm_player != None:
-            comm_player.quit()
-    except Exception as ex:
-        report_error("COMM_quit", ["Position", ensure_string(err_pos), "Error", ensure_string(ex)])
-    try:
-        if player != None:
-            player.quit()
-    except Exception as exx:
-        report_error("PLAY_quit",["Position", ensure_string(err_pos), "Error", ensure_string(exx)])
-    
-    return 1
+	try:
+		if comm_player != None:
+			comm_player.quit()
+	except Exception as ex:
+		report_error("COMM_quit", ["Position", ensure_string(err_pos), "Error", ensure_string(ex)])
+	try:
+		if player != None:
+			player.quit()
+	except Exception as exx:
+		report_error("PLAY_quit",["Position", ensure_string(err_pos), "Error", ensure_string(exx)])
+	
+	return 1
 
 def ensure_string(value):
 	"""
@@ -577,89 +582,89 @@ def ensure_string(value):
 			return ""
 
 def convert_percentages(expr):
-    """
-    Converts percentage values in a mathematical expression to their decimal equivalents.
-    
-    :param expr: A string containing a mathematical expression with percentage values.
-    :return: A string with percentage values converted to decimal.
-    """
+	"""
+	Converts percentage values in a mathematical expression to their decimal equivalents.
+	
+	:param expr: A string containing a mathematical expression with percentage values.
+	:return: A string with percentage values converted to decimal.
+	"""
 
-    def repl(match):
-        num = float(match.group(1))
-        return str(num / 100.0)
+	def repl(match):
+		num = float(match.group(1))
+		return str(num / 100.0)
 
-    # Match any number (int or float) followed by %
-    return re.sub(r'(\d+(?:\.\d+)?)%', repl, expr)
+	# Match any number (int or float) followed by %
+	return re.sub(r'(\d+(?:\.\d+)?)%', repl, expr)
 
 def is_safe_equation(expr_str):
-    try:
-        tree = ast.parse(expr_str, mode='eval')
-        for node in ast.walk(tree):
-            if not isinstance(node, ALLOWED_AST_NODES):
-                return False
-            # Block calling unapproved attributes/methods
-            if isinstance(node, ast.Attribute):
-                return False
-        return True
-    except Exception:
-        return False
+	try:
+		tree = ast.parse(expr_str, mode='eval')
+		for node in ast.walk(tree):
+			if not isinstance(node, ALLOWED_AST_NODES):
+				return False
+			# Block calling unapproved attributes/methods
+			if isinstance(node, ast.Attribute):
+				return False
+		return True
+	except Exception:
+		return False
 
 def eval_equation(equation):
-    """
-    Tries to evaluate a mathematical equation string and return the result.
-    """
-    global now
+	"""
+	Tries to evaluate a mathematical equation string and return the result.
+	"""
+	global now
 
-    try:
-        if len(equation) > 300:
-            return -2
+	try:
+		if len(equation) > 300:
+			return -2
 
-        # 1. Evaluate direct percentages first before passing to AST
-        match = re.match(r'(\d+(?:\.\d+)?)%', equation.strip())
-        if match and match.end() == len(equation.strip()):
-            num = float(match.group(1))
-            if 0.0 <= num <= 100.0:
-                return float(num / 100.0)
+		# 1. Evaluate direct percentages first before passing to AST
+		match = re.match(r'(\d+(?:\.\d+)?)%', equation.strip())
+		if match and match.end() == len(equation.strip()):
+			num = float(match.group(1))
+			if 0.0 <= num <= 100.0:
+				return float(num / 100.0)
 
-        # 2. Validate syntax tree against sandbox escapes
-        if not is_safe_equation(equation):
-            return -3
+		# 2. Validate syntax tree against sandbox escapes
+		if not is_safe_equation(equation):
+			return -3
 
-        safe_globals = {
-            "__builtins__": {},
-            "sin": math.sin,
-            "cos": math.cos,
-            "tan": math.tan,
-            "abs": abs,
-            "min": min,
-            "max": max,
-            "round": round,
-            "floor": math.floor,
-            "ceil": math.ceil,
-            "log": math.log,
-            "exp": math.exp,
-            "pi": math.pi,
-            "e": math.e,
-            "scale": lambda x: float(x) / 100,
-            "clamp": lambda x, y=1.0: max(0.0, min(y, float(x))),
-            "bound": lambda x, low, high: max(low, min(high, float(x))),
-            "stamp": (now - datetime.datetime(1970, 1, 1)).total_seconds(),
-            "date": lambda y, m, d: (datetime.datetime(int(y), int(m), int(d)) - datetime.datetime(1970, 1, 1)).total_seconds(),
-            "time": lambda h, m=0, s=0: int(h) * 3600 + int(m) * 60 + int(s),
-            "datetime": lambda y, mo, d, h=0, mi=0, s=0: (datetime.datetime(int(y), int(mo), int(d), int(h), int(mi), int(s)) - datetime.datetime(1970, 1, 1)).total_seconds(),
-            "day": float(now.day),
-            "maxdays": float(calendar.monthrange(now.year, now.month)[1]),
-            "weekday": float(now.weekday()),
-            "month": float(now.month),
-            "hour": float(now.hour),
-            "minute": float(now.minute),
-            "second": float(now.second),
-            "year": float(now.year)
-        }
-        
-        return eval(equation, safe_globals, {})
-    except:
-        return -1
+		safe_globals = {
+			"__builtins__": {},
+			"sin": math.sin,
+			"cos": math.cos,
+			"tan": math.tan,
+			"abs": abs,
+			"min": min,
+			"max": max,
+			"round": round,
+			"floor": math.floor,
+			"ceil": math.ceil,
+			"log": math.log,
+			"exp": math.exp,
+			"pi": math.pi,
+			"e": math.e,
+			"scale": lambda x: float(x) / 100,
+			"clamp": lambda x, y=1.0: max(0.0, min(y, float(x))),
+			"bound": lambda x, low, high: max(low, min(high, float(x))),
+			"stamp": (now - datetime.datetime(1970, 1, 1)).total_seconds(),
+			"date": lambda y, m, d: (datetime.datetime(int(y), int(m), int(d)) - datetime.datetime(1970, 1, 1)).total_seconds(),
+			"time": lambda h, m=0, s=0: int(h) * 3600 + int(m) * 60 + int(s),
+			"datetime": lambda y, mo, d, h=0, mi=0, s=0: (datetime.datetime(int(y), int(mo), int(d), int(h), int(mi), int(s)) - datetime.datetime(1970, 1, 1)).total_seconds(),
+			"day": float(now.day),
+			"maxdays": float(calendar.monthrange(now.year, now.month)[1]),
+			"weekday": float(now.weekday()),
+			"month": float(now.month),
+			"hour": float(now.hour),
+			"minute": float(now.minute),
+			"second": float(now.second),
+			"year": float(now.year)
+		}
+		
+		return eval(equation, safe_globals, {})
+	except:
+		return -1
 
 def get_setting(find, default=None, force_type=None):
 	"""
@@ -763,10 +768,10 @@ def replace_special_words(date_str):
 	"""
 	global now
 
-    # --- Custom Logic for %TOPTENSMIN% (00-05 or 30-35 minute triggers) ---
+	# --- Custom Logic for %TOPTENSMIN% (00-05 or 30-35 minute triggers) ---
 	minute_tens = now.strftime("%M")[0]
 	top_tens_min_replacement = ""
-    # Only allow substitution if the current minute starts with a '0' or '3'
+	# Only allow substitution if the current minute starts with a '0' or '3'
 	if minute_tens == '0' or minute_tens == '3':
 		top_tens_min_replacement = minute_tens
 
@@ -807,116 +812,116 @@ def replace_special_words(date_str):
 	return date_str
 
 def check_time_match(time_range_list, current_datetime):
-    """
-    Checks if current_datetime is within a single time range.
-    
-    :param time_range_list: A list containing [start_time_str, end_time_str].
-    :param current_datetime: The datetime object to check against.
-    :return: True if the current time is within the range, False otherwise.
-    """
-    # Defensive check: ensure we have a list of two strings/items
-    if not isinstance(time_range_list, list) or len(time_range_list) < 2:
-        return False
+	"""
+	Checks if current_datetime is within a single time range.
+	
+	:param time_range_list: A list containing [start_time_str, end_time_str].
+	:param current_datetime: The datetime object to check against.
+	:return: True if the current time is within the range, False otherwise.
+	"""
+	# Defensive check: ensure we have a list of two strings/items
+	if not isinstance(time_range_list, list) or len(time_range_list) < 2:
+		return False
 
-    # 1. Apply placeholders (like %HOUR%)
-    start_time_str = replace_special_words(time_range_list[0])
-    end_time_str = replace_special_words(time_range_list[1])
-    current_time = current_datetime.time()
+	# 1. Apply placeholders (like %HOUR%)
+	start_time_str = replace_special_words(time_range_list[0])
+	end_time_str = replace_special_words(time_range_list[1])
+	current_time = current_datetime.time()
 
-    try:
-        # 2. Convert to time objects
-        check_start_time = datetime.datetime.strptime(start_time_str, "%I:%M%p").time()
-        end_time = datetime.datetime.strptime(end_time_str, "%I:%M%p").time()
+	try:
+		# 2. Convert to time objects
+		check_start_time = datetime.datetime.strptime(start_time_str, "%I:%M%p").time()
+		end_time = datetime.datetime.strptime(end_time_str, "%I:%M%p").time()
 
-        # 3. Perform comparison
-        return check_start_time <= current_time <= end_time
-    except ValueError:
-        # Fails silently if a resulting time string is invalid
-        return False
+		# 3. Perform comparison
+		return check_start_time <= current_time <= end_time
+	except ValueError:
+		# Fails silently if a resulting time string is invalid
+		return False
 
 
 def is_within_range(data):
-    """
-    Checks if the current date and time fall within the specified ranges, 
-    using AND/OR logic for time based on nested lists.
+	"""
+	Checks if the current date and time fall within the specified ranges, 
+	using AND/OR logic for time based on nested lists.
 
-    :param data: A dictionary containing date, time, and year ranges.
-    :return: True if the current date and time fall within the ranges, False otherwise.
-    """
-    global now # always use the global 'now' variable for date and time
-    current_datetime = now
-    
-    # We will keep the original (OR) logic for dates and years as you intended.
-    
-    date_ranges = data.get("dates", [])
-    time_ranges = data.get("times", [])
-    year_ranges = data.get("years", [])
+	:param data: A dictionary containing date, time, and year ranges.
+	:return: True if the current date and time fall within the ranges, False otherwise.
+	"""
+	global now # always use the global 'now' variable for date and time
+	current_datetime = now
+	
+	# We will keep the original (OR) logic for dates and years as you intended.
+	
+	date_ranges = data.get("dates", [])
+	time_ranges = data.get("times", [])
+	year_ranges = data.get("years", [])
 
-    # --- Check Year Ranges (Original OR Logic) ---
-    year_within_range = True
-    for year_range in year_ranges:
-        year_within_range = False
-        if replace_special_words(str(year_range)) == str(current_datetime.year):
-            year_within_range = True
-            break
+	# --- Check Year Ranges (Original OR Logic) ---
+	year_within_range = True
+	for year_range in year_ranges:
+		year_within_range = False
+		if replace_special_words(str(year_range)) == str(current_datetime.year):
+			year_within_range = True
+			break
 
-    # --- Check Date Ranges (Original OR Logic) ---
-    date_within_range = True
-    for date_range in date_ranges:
-        date_within_range = False
-        if isinstance(date_range, list): # a list of dates [start, end]
-            start_date_str = replace_special_words(date_range[0])
-            end_date_str = replace_special_words(date_range[1])
-            
-            start_date = datetime.datetime.strptime(start_date_str + " " + str(now.year), "%b %d %Y")
-            end_date = datetime.datetime.strptime(end_date_str + " " + str(now.year), "%b %d %Y")
-            
-            if start_date.date() <= current_datetime.date() <= end_date.date():
-                date_within_range = True
-                break
-        else: # a single date
-            start_date_str = replace_special_words(date_range)
-            start_date = datetime.datetime.strptime(start_date_str + " " + str(now.year), "%b %d %Y")
-            if start_date.date() == current_datetime.date():
-                date_within_range = True
-                break
-    
-    # --- Check Time Ranges (NEW Nested AND/OR Logic) ---
-    if not time_ranges:
-        time_within_range = True
-    else:
-        time_within_range = False
-        
-        # Outer Loop: OR Logic (Must match ANY top-level item)
-        for top_level_item in time_ranges:
-            
-            current_item_matches = False
-            
-            # Case A: Nested AND Check (e.g., [ ['start', 'end'], ['start2', 'end2'] ] )
-            if isinstance(top_level_item[0], list): 
-                
-                is_and_match = True
-                for inner_range in top_level_item:
-                    # Use the helper to check the inner condition
-                    if not check_time_match(inner_range, current_datetime):
-                        is_and_match = False
-                        break # Failed the AND requirement
-                
-                if is_and_match:
-                    current_item_matches = True
+	# --- Check Date Ranges (Original OR Logic) ---
+	date_within_range = True
+	for date_range in date_ranges:
+		date_within_range = False
+		if isinstance(date_range, list): # a list of dates [start, end]
+			start_date_str = replace_special_words(date_range[0])
+			end_date_str = replace_special_words(date_range[1])
+			
+			start_date = datetime.datetime.strptime(start_date_str + " " + str(now.year), "%b %d %Y")
+			end_date = datetime.datetime.strptime(end_date_str + " " + str(now.year), "%b %d %Y")
+			
+			if start_date.date() <= current_datetime.date() <= end_date.date():
+				date_within_range = True
+				break
+		else: # a single date
+			start_date_str = replace_special_words(date_range)
+			start_date = datetime.datetime.strptime(start_date_str + " " + str(now.year), "%b %d %Y")
+			if start_date.date() == current_datetime.date():
+				date_within_range = True
+				break
+	
+	# --- Check Time Ranges (NEW Nested AND/OR Logic) ---
+	if not time_ranges:
+		time_within_range = True
+	else:
+		time_within_range = False
+		
+		# Outer Loop: OR Logic (Must match ANY top-level item)
+		for top_level_item in time_ranges:
+			
+			current_item_matches = False
+			
+			# Case A: Nested AND Check (e.g., [ ['start', 'end'], ['start2', 'end2'] ] )
+			if isinstance(top_level_item[0], list): 
+				
+				is_and_match = True
+				for inner_range in top_level_item:
+					# Use the helper to check the inner condition
+					if not check_time_match(inner_range, current_datetime):
+						is_and_match = False
+						break # Failed the AND requirement
+				
+				if is_and_match:
+					current_item_matches = True
 
-            # Case B: Simple OR Check (e.g., ['start', 'end'])
-            else:
-                if check_time_match(top_level_item, current_datetime):
-                    current_item_matches = True
-                    
-            # Overall OR Break: If a match was found for this top-level item
-            if current_item_matches:
-                time_within_range = True
-                break
-    
-    # Final Result: All conditions must be met
-    return date_within_range and time_within_range and year_within_range
+			# Case B: Simple OR Check (e.g., ['start', 'end'])
+			else:
+				if check_time_match(top_level_item, current_datetime):
+					current_item_matches = True
+					
+			# Overall OR Break: If a match was found for this top-level item
+			if current_item_matches:
+				time_within_range = True
+				break
+	
+	# Final Result: All conditions must be met
+	return date_within_range and time_within_range and year_within_range
 
 def calculate_fill_time(video_length, current_time, offset=0):
 	"""
@@ -956,7 +961,7 @@ def calculate_fill_time(video_length, current_time, offset=0):
 # 	stores the last played time for files set to have minimum time between plays
 # repeatedly_tracked_plays structure:
 # {
-#    "file": source,
+#	"file": source,
 #	"last_played": timestamp
 # }
 # Dictionary to track last played time and minimum cooldown
@@ -1644,7 +1649,7 @@ def get_videos_from_dir_cached(dir_path, min_length=GET_VIDEOS_FROM_DIR_MIN_DURA
 	if cache_entry and now - cache_entry['timestamp'] < 120:  # 2 min freshness window
 		return cache_entry['results']
 
-    # Otherwise, refresh from disk
+	# Otherwise, refresh from disk
 	results = get_files_from_dir(dir_path, filter, min_length, max_length)
 	_cached_get_videos_from_dir[cache_key] = {
 		'timestamp': now,
@@ -1695,7 +1700,7 @@ def get_holiday_datetime(holiday, year=None):
 	ret = -1
 
 	if holiday == "thanksgiving":
-    # Thanksgiving is the 4th Thursday of November (falls between Nov 22 and Nov 28)
+	# Thanksgiving is the 4th Thursday of November (falls between Nov 22 and Nov 28)
 		first_of_nov = datetime.datetime(search_year, 11, 1)
 		dw = first_of_nov.weekday()
 		day = 22 + (10 - dw) % 7
