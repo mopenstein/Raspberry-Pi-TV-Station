@@ -161,6 +161,22 @@ function isDriveAllowed(string $path, array $drives): bool {
 	return false;
 }
 
+if (isset($_GET['get_live_status'])) {
+    header('Content-Type: application/json');
+    
+    $status_file = '/dev/shm/tv_status.json';
+    
+    if (file_exists($status_file)) {
+        die(file_get_contents($status_file));
+    } else {
+        die(json_encode([
+            "state" => "offline",
+            "file" => "",
+            "position" => 0
+        ]));
+    }
+}
+
 if(isset($_GET['get_last_played'])) {
 	$result = $mysqli->query("SELECT * FROM played ORDER BY id DESC LIMIT 1") or die($mysqli->error);
 	$last_played = null;
@@ -187,6 +203,51 @@ if(isset($_GET['get_last_played'])) {
 			"len" => (int)substr($last_played["name"], strpos($last_played["name"], "%T(") + 3, strpos($last_played["name"], ")%") - strpos($last_played["name"], "%T(") - 3)
 		]));
 
+}
+
+if(isset($_GET['get_last_comm_played'])) {
+    $result = $mysqli->query("SELECT * FROM commercials ORDER BY id DESC LIMIT 1") or die($mysqli->error);
+    $last_played = null;
+    if ($result->num_rows > 0) {
+        $last_played = $result->fetch_assoc();
+    }
+    
+    if (!$last_played) {
+        die(json_encode([
+            "name" => "ERROR: NOT FOUND",
+            "short_name" => "ERROR",
+            "played" => -1,
+            "id" => -1,
+            "len" => -1
+        ]));
+    }
+
+    $response = [
+        "name" => rawurlencode($last_played["name"]),
+        "short_name" => null,
+        "played" => (int)$last_played["played"],
+        "id" => (int)$last_played["id"],
+        "len" => (int)substr($last_played["name"], strpos($last_played["name"], "%T(") + 3, strpos($last_played["name"], ")%") - strpos($last_played["name"], "%T(") - 3)
+    ];
+
+    // Optional 'since' parameter: appends every commercial aired after the supplied unixtime
+    if (isset($_GET['since']) && is_numeric($_GET['since'])) {
+        $since = (int)$_GET['since'];
+        $history_result = $mysqli->query("SELECT id, name, played FROM commercials WHERE played > {$since} ORDER BY played ASC") or die($mysqli->error);
+
+        $history = [];
+        while ($row = $history_result->fetch_assoc()) {
+            $history[] = [
+                "id" => (int)$row["id"],
+                "name" => rawurlencode($row["name"]),
+                "played" => (int)$row["played"],
+                "len" => (int)substr($row["name"], strpos($row["name"], "%T(") + 3, strpos($row["name"], ")%") - strpos($row["name"], "%T(") - 3)
+            ];
+        }
+        $response["commercials"] = $history;
+    }
+
+    die(json_encode($response));
 }
 
 if (isset($_GET['rename_video'], $_GET['to'])) {
