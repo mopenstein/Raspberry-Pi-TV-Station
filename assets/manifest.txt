@@ -12,6 +12,7 @@ sync:restart.sh->/home/pi/Desktop/restart.sh
 sync:startup.sh->/home/pi/Desktop/startup.sh
 sync:stop_script.sh->/home/pi/Desktop/stop_script.sh
 sync:test_settings.py->/home/pi/Desktop/test_settings.py
+sync:state_manager.py->/home/pi/Desktop/state_manager.py
 
 # web ui
 sync:webui/index.php->/var/www/html/index.php
@@ -30,6 +31,7 @@ sync:webui/test_settings.php->/var/www/html/test_settings.php
 sync:webui/videoeditor.php->/var/www/html/videoeditor.php
 sync:webui/videostream.inc->/var/www/html/videostream.inc
 sync:webui/youtube-dl.php->/var/www/html/youtube-dl.php
+sync:webui/tvplayer.php->/var/www/html/tvplayer.php
 
 # Manage cards
 sync:webui/manage/StationControl.php->/var/www/html/manage/StationControl.php
