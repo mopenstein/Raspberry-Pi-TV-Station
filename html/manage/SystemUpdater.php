@@ -133,7 +133,7 @@ class SystemUpdater implements ManageCard {
                     <span id="terminalTitle">Console Output</span>
                     <span id="updateStatusText" style="color: #bbb;">Running...</span>
                 </div>
-                <pre id="updateTerminal" style="margin:0; background: #000; color: #39ff14; font-family: monospace; font-size: 12px; padding: 12px; height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid #333; border-top: none;"></pre>
+                <pre id="updateTerminal" style="margin:0; background: #000; color: #f1f5f9; font-family: monospace; font-size: 12px; padding: 12px; height: 260px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; border: 1px solid #333; border-top: none;"></pre>
             </div>
         </div>
 
@@ -167,7 +167,7 @@ class SystemUpdater implements ManageCard {
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
-                    term.textContent += decoder.decode(value, { stream: true });
+                    term.innerHTML += decoder.decode(value, { stream: true });
                     term.scrollTop = term.scrollHeight;
                 }
 
@@ -269,6 +269,19 @@ class SystemUpdater implements ManageCard {
     }
 
     private function streamUpdateProcess() {
+		$ansi_search = [
+			"\033[0;31m", // Red
+			"\033[0;34m", // Blue
+			"\033[0;33m", // Yellow
+			"\033[0m"      // Reset
+		];
+
+		$html_replace = [
+			'<span style="color: #ef4444;">',
+			'<span style="color: #60a5fa;">',
+			'<span style="color: #facc15;">',
+			'</span>'
+		];
         set_time_limit(300);
 
         @ini_set('output_buffering', 'off');
@@ -308,7 +321,7 @@ class SystemUpdater implements ManageCard {
             while (!feof($pipes[1])) {
                 $chunk = fgets($pipes[1]);
                 if ($chunk !== false) {
-                    echo $chunk;
+                    echo str_replace($ansi_search, $html_replace, $chunk);
                     flush();
                 }
             }
