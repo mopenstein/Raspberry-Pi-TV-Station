@@ -5,7 +5,12 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
-# Update these two variables with your repository details
+# ANSI Color Codes
+CLR_RESET='\033[0m'
+CLR_RED='\033[0;31m'
+CLR_BLUE='\033[0;34m'
+CLR_YELLOW='\033[0;33m'
+
 GITHUB_USER="mopenstein"
 REPO_NAME="raspberry_pi_tv_station"
 BRANCH="main"
@@ -105,7 +110,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     if [[ "$line" =~ ^remove: ]]; then
         TARGET="${line#remove:}"
         if [ -e "$TARGET" ]; then
-            echo "Removing: $TARGET"
+            echo -e "${CLR_RED}Removing:${CLR_RESET} $TARGET"
             rm -rf "$TARGET"
         fi
         continue
@@ -148,7 +153,7 @@ while IFS= read -r line || [ -n "$line" ]; do
                 echo "Unchanged: $LOCAL_DEST"
                 rm -f "$TMP_DOWNLOAD"
             else
-                echo "Updating: $REMOTE_SRC -> $LOCAL_DEST"
+                echo -e "${CLR_BLUE}Updating:${CLR_RESET} $REMOTE_SRC -> $LOCAL_DEST"
                 mv "$TMP_DOWNLOAD" "$LOCAL_DEST"
 
                 # Always enforce pi:www-data for web files, regardless of prior ownership
@@ -183,7 +188,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     # 3. Handle shell/CLI execution (run:command)
     if [[ "$line" =~ ^run: ]]; then
         CMD="${line#run:}"
-        echo "Running task: $CMD"
+        echo -e "${CLR_YELLOW}Running task:${CLR_RESET} $CMD"
         eval "$CMD"
         continue
     fi
