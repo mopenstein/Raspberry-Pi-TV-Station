@@ -89,10 +89,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Load Show Categories from schedule.json
 $showCategories = [];
+$showCategoriesSorted = [];
 if (file_exists($schedulePath)) {
     $scheduleData = json_decode(file_get_contents($schedulePath), true);
     if (is_array($scheduleData)) {
         $showCategories = array_keys($scheduleData);
+		$showCategoriesSorted = $showCategories;
+		sort($showCategoriesSorted, SORT_NATURAL | SORT_FLAG_CASE);
     }
 }
 
@@ -159,7 +162,7 @@ if (file_exists($settingsPath)) {
         <div class="form-group" id="groupShowCat">
             <label for="showCategorySelect">Show Category</label>
             <select id="showCategorySelect" onchange="syncCategorySelection(this.value)">
-                <?php foreach ($showCategories as $cat): ?>
+                <?php foreach ($showCategoriesSorted as $cat): ?>
                     <option value="<?= htmlspecialchars($cat) ?>"><?= htmlspecialchars($cat) ?></option>
                 <?php endforeach; ?>
             </select>
