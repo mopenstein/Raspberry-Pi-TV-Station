@@ -46,6 +46,7 @@ sync:html/manage/FlaggedCommercials.php->/var/www/html/manage/FlaggedCommercials
 sync:html/manage/FlaggedVideos.php->/var/www/html/manage/FlaggedVideos.php
 sync:html/manage/MountedDrivesManager.php->/var/www/html/manage/MountedDrivesManager.php
 sync:html/manage/Plugins.php->/var/www/html/manage/Plugins.php
+sync:html/manage/Takeout.php->/var/www/html/manage/Takeout.php
 sync:html/manage/Programming.php->/var/www/html/manage/Programming.php
 sync:html/manage/StationControl.php->/var/www/html/manage/StationControl.php
 sync:html/manage/SystemUpdater.php->/var/www/html/manage/SystemUpdater.php
