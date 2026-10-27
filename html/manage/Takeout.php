@@ -61,28 +61,24 @@ class Takeout implements ManageCard {
                 ["path" => "/var/www/html/docs",            "archive_target" => "docs"],
                 ["path" => "/var/www/html/templates",       "archive_target" => "templates"]
             ];
-            file_put_contents($this->manifest_file, json_encode($defaultManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            @file_put_contents($this->manifest_file, json_encode($defaultManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             @chmod($this->manifest_file, 0777);
             return $defaultManifest;
         }
 
-        $raw = file_get_contents($this->manifest_file);
+        $raw = @file_get_contents($this->manifest_file);
         $parsed = json_decode($raw, true);
         return is_array($parsed) ? $parsed : [];
     }
 
     private function resolveDynamicPath(string $path) {
-        // Detect setting traversal prefix: $/
         if (substr($path, 0, 2) === '$/') {
             if (empty($this->settings)) {
                 return null;
             }
 
-            // Strip the leading '$/' and explode hierarchy by '/'
             $subPath = substr($path, 2);
             $parts = explode('/', $subPath);
-
-            // Normalize base settings array ($cfg or $cfg[0])
             $curr = isset($this->settings[0]) && is_array($this->settings[0]) ? $this->settings[0] : $this->settings;
 
             foreach ($parts as $segment) {
@@ -94,12 +90,10 @@ class Takeout implements ManageCard {
                 if (is_array($curr) && array_key_exists($segment, $curr)) {
                     $curr = $curr[$segment];
                 } else {
-                    // Setting branch not found
                     return null;
                 }
             }
 
-            // Return path string if found
             return is_string($curr) ? rtrim($curr, '/') : null;
         }
 
@@ -112,7 +106,7 @@ class Takeout implements ManageCard {
         if (isset($json_response)) {
             $this->setSettings($json_response);
         } elseif (file_exists($this->settings_file)) {
-            $raw = file_get_contents($this->settings_file);
+            $raw = @file_get_contents($this->settings_file);
             $parsed = json_decode($raw, true);
             if ($parsed) {
                 $this->setSettings($parsed);
@@ -145,7 +139,9 @@ class Takeout implements ManageCard {
         }
 
         $tmpDir = sys_get_temp_dir() . '/takeout_' . uniqid();
-        @mkdir($tmpDir, 0777, true);
+        if (!@mkdir($tmpDir, 0777, true)) {
+            die('Error: Unable to create temporary directory. Please check file and directory permissions.');
+        }
 
         $sqlFile = $tmpDir . '/database_backup.sql';
         if (!empty($this->db_config['user']) && !empty($this->db_config['name'])) {
@@ -163,14 +159,14 @@ class Takeout implements ManageCard {
             exec($dumpCmd);
         }
 
-		$takeoutName = $this->settings[0]['name'] ?? 'station';
-		$takeoutName = preg_replace('/[^a-zA-Z0-9]/', '.', $takeoutName);
-		$takeoutName = preg_replace('/\.{2,}/', '.', $takeoutName);
+        $takeoutName = $this->settings[0]['name'] ?? 'station';
+        $takeoutName = preg_replace('/[^a-zA-Z0-9]/', '.', $takeoutName);
+        $takeoutName = preg_replace('/\.{2,}/', '.', $takeoutName);
         $zipPath = $tmpDir . '/' . $takeoutName . '_takeout_' . date('Y-m-d_His') . '.zip';
         $zip = new ZipArchive();
 
         if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            die('Error: Unable to build takeout archive.');
+            die('Error: Unable to initialize takeout archive on disk. Check file permissions.');
         }
 
         if (file_exists($sqlFile) && filesize($sqlFile) > 0) {
@@ -271,24 +267,31 @@ class Takeout implements ManageCard {
         }
 
         $stageDir = sys_get_temp_dir() . '/takeout_stage_' . uniqid();
-        if (!mkdir($stageDir, 0777, true)) {
-            $this->status_msg = '<span style="color:#ff6b6b;">Failed to create staging directory.</span>';
+        if (!@mkdir($stageDir, 0777, true)) {
+            $this->status_msg = '<span style="color:#ff6b6b;"><strong>Permission Error:</strong> Unable to create temporary staging directory at <code>' . htmlspecialchars($stageDir) . '</code>.</span>';
             return;
         }
 
         $destArchive = $stageDir . '/staged.zip';
-        if (!move_uploaded_file($file['tmp_name'], $destArchive)) {
-            $this->status_msg = '<span style="color:#ff6b6b;">Failed to store staged archive.</span>';
+        if (!@move_uploaded_file($file['tmp_name'], $destArchive)) {
+            $this->status_msg = '<span style="color:#ff6b6b;"><strong>Write Error:</strong> Unable to write uploaded archive to disk. Check permissions on <code>' . htmlspecialchars($stageDir) . '</code>.</span>';
+            @exec('rm -rf ' . escapeshellarg($stageDir));
             return;
         }
 
         $zip = new ZipArchive();
         if ($zip->open($destArchive) !== true) {
             $this->status_msg = '<span style="color:#ff6b6b;">Invalid or corrupted ZIP archive.</span>';
+            @exec('rm -rf ' . escapeshellarg($stageDir));
             return;
         }
 
-        $zip->extractTo($stageDir);
+        if (!@$zip->extractTo($stageDir)) {
+            $this->status_msg = '<span style="color:#ff6b6b;"><strong>Write Error:</strong> Unable to extract archive to disk. Please verify target write permissions.</span>';
+            $zip->close();
+            @exec('rm -rf ' . escapeshellarg($stageDir));
+            return;
+        }
         $zip->close();
 
         $sqlPath = $stageDir . '/database_backup.sql';
@@ -329,7 +332,7 @@ class Takeout implements ManageCard {
     private function executeImport() {
         $stageDir = $_POST['stage_dir'] ?? '';
         if (empty($stageDir) || !is_dir($stageDir)) {
-            $this->status_msg = '<span style="color:#ff6b6b;">Staging session expired. Please re-upload.</span>';
+            $this->status_msg = '<span style="color:#ff6b6b;">Staging session expired or not found. Please re-upload.</span>';
             return;
         }
 
@@ -344,9 +347,9 @@ class Takeout implements ManageCard {
         }
 
         $manifestPath = $stageDir . '/manifest.json';
-        $archiveManifest = file_exists($manifestPath) ? json_decode(file_get_contents($manifestPath), true) : null;
+        $archiveManifest = file_exists($manifestPath) ? json_decode(@file_get_contents($manifestPath), true) : null;
 
-        // Prioritize settings.json to bootstrap credentials and paths
+        // Settings file restore
         $settingsArchiveItem = null;
         if (is_array($archiveManifest)) {
             foreach ($archiveManifest as $item) {
@@ -359,14 +362,26 @@ class Takeout implements ManageCard {
 
         $stagedSettings = $settingsArchiveItem ? ($stageDir . '/' . $settingsArchiveItem['archive_target']) : ($stageDir . '/settings.json');
         if (file_exists($stagedSettings)) {
-            $settingsContent = file_get_contents($stagedSettings);
+            $settingsContent = @file_get_contents($stagedSettings);
             if (!empty($replacements)) {
                 $settingsContent = str_replace(array_keys($replacements), array_values($replacements), $settingsContent);
             }
 
             $targetSettingsPath = $settingsArchiveItem ? $this->resolveDynamicPath($settingsArchiveItem['original_path']) : $this->settings_file;
-            @mkdir(dirname($targetSettingsPath), 0775, true);
-            file_put_contents($targetSettingsPath, $settingsContent);
+            $parentDir = dirname($targetSettingsPath);
+
+            if (!is_dir($parentDir) && !@mkdir($parentDir, 0775, true)) {
+                $this->status_msg = '<span style="color:#ff6b6b;"><strong>Permission Error:</strong> Cannot create settings directory <code>' . htmlspecialchars($parentDir) . '</code>.</span>';
+                @exec('rm -rf ' . escapeshellarg($stageDir));
+                return;
+            }
+
+            if (@file_put_contents($targetSettingsPath, $settingsContent) === false) {
+                $this->status_msg = '<span style="color:#ff6b6b;"><strong>Permission Error:</strong> Failed to write to <code>' . htmlspecialchars($targetSettingsPath) . '</code>. Check ownership/permissions.</span>';
+                @exec('rm -rf ' . escapeshellarg($stageDir));
+                return;
+            }
+
             @chmod($targetSettingsPath, 0777);
             @exec('sudo chown pi:pi ' . escapeshellarg($targetSettingsPath));
             @exec('sudo chmod 0777 ' . escapeshellarg($targetSettingsPath));
@@ -377,22 +392,24 @@ class Takeout implements ManageCard {
             }
         }
 
-        // Restore Database
+        // Database restore
         $sqlPath = $stageDir . '/database_backup.sql';
         if (file_exists($sqlPath)) {
             if (!empty($replacements)) {
                 $rewrittenSql = $sqlPath . '.rewritten';
-                $in = fopen($sqlPath, 'r');
-                $out = fopen($rewrittenSql, 'w');
+                $in = @fopen($sqlPath, 'r');
+                $out = @fopen($rewrittenSql, 'w');
 
-                while (($line = fgets($in)) !== false) {
-                    $line = str_replace(array_keys($replacements), array_values($replacements), $line);
-                    fwrite($out, $line);
+                if ($in && $out) {
+                    while (($line = fgets($in)) !== false) {
+                        $line = str_replace(array_keys($replacements), array_values($replacements), $line);
+                        fwrite($out, $line);
+                    }
+                    fclose($in);
+                    fclose($out);
+                    @unlink($sqlPath);
+                    @rename($rewrittenSql, $sqlPath);
                 }
-                fclose($in);
-                fclose($out);
-                unlink($sqlPath);
-                rename($rewrittenSql, $sqlPath);
             }
 
             if (!empty($this->db_config['user']) && !empty($this->db_config['name'])) {
@@ -411,7 +428,7 @@ class Takeout implements ManageCard {
             }
         }
 
-        // Restore remaining manifest files/directories dynamically
+        // Manifest restore
         if (is_array($archiveManifest)) {
             foreach ($archiveManifest as $item) {
                 if ($item === $settingsArchiveItem) {
@@ -426,14 +443,29 @@ class Takeout implements ManageCard {
                 }
 
                 if ($item['type'] === 'dir') {
-                    if (!is_dir($destinationPath)) {
-                        @mkdir($destinationPath, 0777, true);
+                    if (!is_dir($destinationPath) && !@mkdir($destinationPath, 0777, true)) {
+                        $this->status_msg = '<span style="color:#ff6b6b;"><strong>Permission Error:</strong> Failed to create directory <code>' . htmlspecialchars($destinationPath) . '</code>.</span>';
+                        @exec('rm -rf ' . escapeshellarg($stageDir));
+                        return;
                     }
-                    $this->copyDirectory($stagedItemPath, $destinationPath);
+                    if (!$this->copyDirectory($stagedItemPath, $destinationPath)) {
+                        $this->status_msg = '<span style="color:#ff6b6b;"><strong>Permission Error:</strong> Failed while copying files into <code>' . htmlspecialchars($destinationPath) . '</code>.</span>';
+                        @exec('rm -rf ' . escapeshellarg($stageDir));
+                        return;
+                    }
                     @exec('sudo chmod -R 0777 ' . escapeshellarg($destinationPath));
                 } elseif ($item['type'] === 'file') {
-                    @mkdir(dirname($destinationPath), 0777, true);
-                    copy($stagedItemPath, $destinationPath);
+                    $fileDestDir = dirname($destinationPath);
+                    if (!is_dir($fileDestDir) && !@mkdir($fileDestDir, 0777, true)) {
+                        $this->status_msg = '<span style="color:#ff6b6b;"><strong>Permission Error:</strong> Directory inaccessible: <code>' . htmlspecialchars($fileDestDir) . '</code>.</span>';
+                        @exec('rm -rf ' . escapeshellarg($stageDir));
+                        return;
+                    }
+                    if (!@copy($stagedItemPath, $destinationPath)) {
+                        $this->status_msg = '<span style="color:#ff6b6b;"><strong>Permission Error:</strong> Could not overwrite <code>' . htmlspecialchars($destinationPath) . '</code>.</span>';
+                        @exec('rm -rf ' . escapeshellarg($stageDir));
+                        return;
+                    }
                     @chmod($destinationPath, 0777);
                     @exec('sudo chmod 0777 ' . escapeshellarg($destinationPath));
                 }
@@ -441,23 +473,55 @@ class Takeout implements ManageCard {
         }
 
         exec('rm -rf ' . escapeshellarg($stageDir));
-        $this->status_msg = '<span style="color:#4ec9b0;">Takeout successfully restored and drives re-mapped!</span>';
+
+        // Render reboot screen and trigger reboot
+        $this->renderRebootScreen();
+        @exec('(sleep 3 && sudo reboot) > /dev/null 2>&1 &');
     }
 
-    private function copyDirectory(string $src, string $dst) {
-        $dir = opendir($src);
-        @mkdir($dst, 0777, true);
+    private function copyDirectory(string $src, string $dst): bool {
+        $dir = @opendir($src);
+        if (!$dir) {
+            return false;
+        }
+
+        if (!is_dir($dst) && !@mkdir($dst, 0777, true)) {
+            closedir($dir);
+            return false;
+        }
+
         while (false !== ($file = readdir($dir))) {
             if ($file !== '.' && $file !== '..') {
-                if (is_dir($src . '/' . $file)) {
-                    $this->copyDirectory($src . '/' . $file, $dst . '/' . $file);
+                $srcPath = $src . '/' . $file;
+                $dstPath = $dst . '/' . $file;
+                if (is_dir($srcPath)) {
+                    if (!$this->copyDirectory($srcPath, $dstPath)) {
+                        closedir($dir);
+                        return false;
+                    }
                 } else {
-                    copy($src . '/' . $file, $dst . '/' . $file);
-                    @chmod($dst . '/' . $file, 0777);
+                    if (!@copy($srcPath, $dstPath)) {
+                        closedir($dir);
+                        return false;
+                    }
+                    @chmod($dstPath, 0777);
                 }
             }
         }
         closedir($dir);
+        return true;
+    }
+
+    private function renderRebootScreen() {
+        $this->html = '
+        <div style="background: rgba(20, 20, 20, 0.95); border: 2px solid #4ec9b0; border-radius: 6px; padding: 20px; text-align: center; margin-top: 15px;">
+            <h3 style="color: #4ec9b0; margin-top: 0;">Takeout Restored Successfully</h3>
+            <p style="font-size: 0.95rem; color: #eee; margin: 12px 0;">All files and databases have been imported and mounts remapped.</p>
+            <div style="background: rgba(255, 193, 7, 0.1); border: 1px solid #ffc107; color: #ffc107; padding: 10px; border-radius: 4px; font-weight: bold; margin-bottom: 15px;">
+                WARNING: The Raspberry Pi is rebooting now to apply configuration changes and remount paths.
+            </div>
+            <p style="font-size: 0.8rem; color: #aaa;">The Web UI will be temporarily unavailable. Please reload this page in roughly 45 to 60 seconds.</p>
+        </div>';
     }
 
     private function renderDriveMappingForm(string $stageDir, array $oldDrives, array $systemDrives) {
