@@ -163,7 +163,10 @@ class Takeout implements ManageCard {
             exec($dumpCmd);
         }
 
-        $zipPath = $tmpDir . '/station_takeout_' . date('Y-m-d_His') . '.zip';
+		$takeoutName = $this->settings[0]['name'] ?? 'station';
+		$takeoutName = preg_replace('/[^a-zA-Z0-9]/', '.', $takeoutName);
+		$takeoutName = preg_replace('/\.{2,}/', '.', $takeoutName);
+        $zipPath = $tmpDir . '/' . $takeoutName . '_takeout_' . date('Y-m-d_His') . '.zip';
         $zip = new ZipArchive();
 
         if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
