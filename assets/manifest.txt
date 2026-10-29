@@ -1,5 +1,5 @@
-version:1
-date:2026/10/27
+version:2
+date:2026/10/28
 
 # clean up old/deprecated files
 remove:/home/pi/Desktop/_rnd80s.py
@@ -86,6 +86,13 @@ sync:html/setup/step2.php->/var/www/html/setup/step2.php
 sync:html/setup/step3.php->/var/www/html/setup/step3.php
 sync:html/setup/step4.php->/var/www/html/setup/step4.php
 sync:html/setup/step5.php->/var/www/html/setup/step5.php
+
+# Maintenance
+ensync:html/maintenance/.db_version->/var/www/html/maintenance/.db_version
+sync:html/maintenance/db_helper.inc->/var/www/html/maintenance/db_helper.inc
+sync:html/maintenance/db_schema.json->/var/www/html/maintenance/db_schema.json
+sync:html/maintenance/migration.php->/var/www/html/maintenance/migration.php
+run:php "/var/www/html/maintenance/migration.php"
 
 # Execute the migration via CLI PHP
 #run:php /var/www/html/migrate.php
