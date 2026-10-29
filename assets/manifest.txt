@@ -92,7 +92,7 @@ ensync:html/maintenance/.db_version->/var/www/html/maintenance/.db_version
 sync:html/maintenance/db_helper.inc->/var/www/html/maintenance/db_helper.inc
 sync:html/maintenance/db_schema.json->/var/www/html/maintenance/db_schema.json
 sync:html/maintenance/migration.php->/var/www/html/maintenance/migration.php
-run:php "/var/www/html/maintenance/migration.php"
+run:php "/var/www/html/maintenance/migration.php" -h
 
 # Execute the migration via CLI PHP
 #run:php /var/www/html/migrate.php
