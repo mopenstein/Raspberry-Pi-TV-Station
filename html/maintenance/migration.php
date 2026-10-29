@@ -107,6 +107,11 @@ if (file_exists($schema_file)) {
         } catch (Exception $e) {
             echo "Failed to write version file: " . $e->getMessage();
         }
+        
+        chown($version_file, 'pi');
+        chgrp($version_file, 'www-data');
+        chmod($version_file, 0664);
+
         if(isset($_GET["h"])) {
             echo "Database schema updated to version: $version_file " . (int)$schema['version'];           
         }
