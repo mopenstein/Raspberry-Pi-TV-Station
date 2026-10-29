@@ -3,7 +3,7 @@ $schema_file  = __DIR__ . '/db_schema.json';
 $version_file = __DIR__ . '/.db_version';
 
 if (file_exists($schema_file)) {
-    require_once("db_helper.inc");
+    require_once(__DIR__ . "/db_helper.inc");
     $schema = json_decode(file_get_contents($schema_file), true);
     $local_version = file_exists($version_file) ? (int)file_get_contents($version_file) : 0;
 
