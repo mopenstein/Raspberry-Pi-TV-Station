@@ -5,6 +5,9 @@ if [ "$EUID" -ne 0 ]; then
     exec sudo "$0" "$@"
 fi
 
+# Updater Master Version
+MASTER_UPDATER_VERSION=2
+
 # ANSI Color Codes
 CLR_RESET='\033[0m'
 CLR_RED='\033[0;31m'
@@ -34,6 +37,24 @@ if ! curl -s -f -L "$GITHUB_RAW/assets/manifest.txt?cache=$(date +%s)" -o "$TMP_
 fi
 
 # ==============================================================================
+# Manifest & Updater Compatibility Check
+# ==============================================================================
+MANIFEST_VERSION=$(grep -m 1 '^version:' "$TMP_MANIFEST" | cut -d':' -f2 | tr -d '\r' | xargs)
+
+if [ -n "$MANIFEST_VERSION" ]; then
+    if [ "$MANIFEST_VERSION" -gt "$MASTER_UPDATER_VERSION" ]; then
+        echo -e "${CLR_RED}============================================================${CLR_RESET}"
+        echo -e "${CLR_RED}WARNING: UPDATER OUT OF DATE!${CLR_RESET}"
+        echo -e "This update requires updater version ${CLR_YELLOW}${MANIFEST_VERSION}${CLR_RESET}, but you have version ${CLR_YELLOW}${MASTER_UPDATER_VERSION}${CLR_RESET}."
+        echo -e "Please manually update the update_station.sh script to proceed."
+		echo -e "https://github.com/mopenstein/Raspberry-Pi-TV-Station/"
+        echo -e "${CLR_RED}============================================================${CLR_RESET}"
+        rm -f "$TMP_MANIFEST"
+        exit 1
+    fi
+fi
+
+# ==============================================================================
 # Dynamic Manifest-Driven Backup
 # ==============================================================================
 BACKUP_DIR="/home/pi/station_backups"
@@ -49,7 +70,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
 
     TARGET=""
-	if [[ "$line" =~ ^(sync|update|create|ifsync): ]]; then
+    if [[ "$line" =~ ^(sync|update|create|ifsync|ensync): ]]; then
         PAYLOAD="${line#*:}"
         TARGET="${PAYLOAD##*->}"
     elif [[ "$line" =~ ^remove: ]]; then
@@ -90,6 +111,11 @@ while IFS= read -r line || [ -n "$line" ]; do
     # Skip empty lines and comment lines
     [[ -z "$line" || "$line" =~ ^# ]] && continue
 
+    # Ignore manifest version line during execution loop
+    if [[ "$line" =~ ^version: ]]; then
+        continue
+    fi
+
     # Capture and save the manifest release/build date
     if [[ "$line" =~ ^date: ]]; then
         VERSION_DATE="${line#date:}"
@@ -117,7 +143,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     fi
 
     # 2. Handle file sync/downloads with hash/byte check and permission preservation
-    if [[ "$line" =~ ^sync: ]] || [[ "$line" =~ ^update: ]] || [[ "$line" =~ ^create: ]] || [[ "$line" =~ ^ifsync: ]]; then
+    if [[ "$line" =~ ^sync: ]] || [[ "$line" =~ ^update: ]] || [[ "$line" =~ ^create: ]] || [[ "$line" =~ ^ifsync: ]] || [[ "$line" =~ ^ensync: ]]; then
         ACTION="${line%%:*}"
         PAYLOAD="${line#*:}"
         REMOTE_SRC="${PAYLOAD%%->*}"
@@ -126,6 +152,12 @@ while IFS= read -r line || [ -n "$line" ]; do
         # If conditional sync, skip immediately if file does not exist locally
         if [ "$ACTION" = "ifsync" ] && [ ! -e "$LOCAL_DEST" ]; then
             echo "Skipping optional (not installed): $LOCAL_DEST"
+            continue
+        fi
+
+        # If ensync, leave existing file intact and only download if absent
+        if [ "$ACTION" = "ensync" ] && [ -e "$LOCAL_DEST" ]; then
+            echo "Skipping existing: $LOCAL_DEST"
             continue
         fi
 
