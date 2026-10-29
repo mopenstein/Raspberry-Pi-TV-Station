@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "date": "October 28, 2026",
+  "tables": {
+    "commercials": {
+      "id": {
+        "type": "INT(11)",
+        "null": false,
+        "auto_increment": true,
+        "primary_key": true
+      },
+      "name": {
+        "type": "VARCHAR(255)",
+        "null": false
+      },
+      "played": {
+        "type": "BIGINT(20)",
+        "null": false
+      },
+      "flag": {
+        "type": "INT(11)",
+        "null": false,
+        "default": "0"
+      },
+      "channel": {
+        "type": "INT(100)",
+        "null": true,
+        "default": null
+      }
+    },
+    "errors": {
+      "id": {
+        "type": "INT(11)",
+        "null": false,
+        "auto_increment": true,
+        "primary_key": true
+      },
+      "name": {
+        "type": "TEXT",
+        "null": false
+      },
+      "played": {
+        "type": "BIGINT(20)",
+        "null": false
+      }
+    },
+    "played": {
+      "id": {
+        "type": "INT(11)",
+        "null": false,
+        "auto_increment": true,
+        "primary_key": true
+      },
+      "short_name": {
+        "type": "VARCHAR(255)",
+        "null": false
+      },
+      "name": {
+        "type": "VARCHAR(255)",
+        "null": false
+      },
+      "played": {
+        "type": "BIGINT(20)",
+        "null": false
+      },
+      "data": {
+        "type": "TEXT",
+        "null": true,
+        "default": null,
+        "after": "played"
+      },
+      "flag": {
+        "type": "INT(11)",
+        "null": false,
+        "default": "0"
+      },
+      "channel": {
+        "type": "VARCHAR(100)",
+        "null": true,
+        "default": null
+      }
+    }
+  }
+}
