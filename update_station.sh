@@ -168,7 +168,17 @@ while IFS= read -r line || [ -n "$line" ]; do
         fi
 
         # Ensure target directory tree exists
-        mkdir -p "$(dirname "$LOCAL_DEST")"
+        TARGET_DIR="$(dirname "$LOCAL_DEST")"
+        if [ ! -d "$TARGET_DIR" ]; then
+            mkdir -p "$TARGET_DIR"
+            if [[ "$TARGET_DIR" == /var/www/* ]]; then
+                chown pi:www-data "$TARGET_DIR"
+                chmod 775 "$TARGET_DIR"
+            else
+                chown pi:pi "$TARGET_DIR"
+                chmod 755 "$TARGET_DIR"
+            fi
+        fi
 
         # Capture existing metadata if the destination file already exists
         PREV_OWNER=""
