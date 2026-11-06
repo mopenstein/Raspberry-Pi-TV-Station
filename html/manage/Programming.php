@@ -13,8 +13,8 @@ class Programming implements ManageCard {
 		// Load links from a file or database
 		$this->links = [
 			[
-				"label" => "Live TV Player",
-				"url" 	=> "/tv-player.html",
+				"label" => "Live Player",
+				"url" 	=> "/player.html",
 				"style" => null,
 				"action" => null
 			],
