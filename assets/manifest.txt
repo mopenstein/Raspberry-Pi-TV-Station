@@ -4,6 +4,7 @@ date:2026/11/06
 # clean up old/deprecated files
 remove:/home/pi/Desktop/_rnd80s.py
 remove:/var/www/html/youtube-dl.php
+remove:/var/www/html/tv-player.html
 remove:/var/www/html/workers/empty_commercials.php
 remove:/var/www/html/workers/empty_errors.php
 remove:/var/www/html/workers/empty_played.php
@@ -35,7 +36,7 @@ sync:html/settings.php->/var/www/html/settings.php
 sync:html/test_settings.php->/var/www/html/test_settings.php
 sync:html/videoeditor.php->/var/www/html/videoeditor.php
 sync:html/videostream.inc->/var/www/html/videostream.inc
-sync:html/tv-player.html->/var/www/html/tv-player.html
+sync:html/player.html->/var/www/html/player.html
 sync:html/web-player.php->/var/www/html/web-player.php
 
 # Manage cards
