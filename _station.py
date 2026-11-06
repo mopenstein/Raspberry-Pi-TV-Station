@@ -1,21 +1,14 @@
 #!/usr/bin/python
-# version: 102.31
-# version date: 2026.10.10
+# version: 102.32
+# version date: 2026.11
 #
-#	Migrating to _station.py from _rnd80s.py
-#	If loading plugins fails, the script will now exit with an error code instead of continuing to run.
-#	Fixed ownership issues with cache
-#	Implemented a broadcast state management API to allow for thread-safe access to the current state of the video player from remote sources (e.g., web server)
-#	Added new wrapper functions for state management api:
-#		- api_update_main - Updates the main broadcast state (video/audio) in a thread-safe manner.
-#		- api_set_override - Sets an override layer that can pause the main broadcast (e.g., for commercials).
-#		- api_clear_override - Clears an override layer, allowing the main broadcast to resume.
-#		- api_set_submedia - Sets an independent submedia layer (e.g., PiP, audio beds) alongside the main broadcast.
-#		- api_clear_submedia - Clears an independent submedia layer.
+#	Moving from single large releases to constant updates.
+#	Cleaning up the codebase and removing legacy/unused code.
+#	Update auto commercial insert logic to allow for a real-world media transition overhead.
 #
-# settings version: 0.996
+# settings version: 0.997
 #
-#	no changes
+#	Added "commercials_delay_modifier" setting to allow for a real-world delay multiplier for media transition overhead (default is 0.5s).
 
 
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
@@ -40,6 +33,7 @@ import subprocess				# for rebooting the machine
 import traceback				# for error reporting
 import hashlib					# for generating hash IDs
 import ast						# for safely evaluating mathematical expressions
+import threading
 
 from state_manager import broadcast_state	# for managing the broadcast state API in a thread-safe manner
 
@@ -63,31 +57,41 @@ if sys.version_info[0] >= 3:
 
 # Constants
 
-SCRIPT_VERSION		= 102.31 # current version of the script
-SETTINGS_VERSION	= 0.996 # the version of the "settings" this script supports
+SCRIPT_VERSION		= 102.32 # current version of the script
+SETTINGS_VERSION	= 0.997 # the version of the "settings" this script supports
 
 GET_VIDEOS_FROM_DIR_MIN_DURATION = 0 	 	# default minimum duration of a video in seconds when returning videos from a directory
 GET_VIDEOS_FROM_DIR_MAX_DURATION = 99999 	# default maximum duration of a video in seconds when returning videos from a directory
 VIDEO_EXTENSIONS = ('mp4', 'avi', 'webm', 'mpeg', 'm4v', 'mkv', 'mov', 'flv', 'wmv')	# video file extensions that are considered valid video files
 
-LAST_PROGRAMMING_SCHEDULE = None # global variable to hold the last programming schedule
+# /Constants
 
 # Allowed AST nodes for safe evaluation of mathematical expressions
 ALLOWED_AST_NODES = (
-	ast.Expression,
-	ast.BinOp,		# +, -, *, /, %
-	ast.UnaryOp,	  # -x, +x
-	ast.operator,	 # Add, Sub, Mult, Div, etc.
-	ast.unaryop,	  # USub, UAdd
-	ast.Num,		  # Python 2 numbers (int, float)
-	ast.Name,		 # variable lookups like 'hour', 'day'
-	ast.Load,		 # context for variable lookups
-	ast.Call,		 # function calls like sin(), clamp()
-	ast.Compare,	  # ==, !=, <, >, <=, >=
-	ast.cmpop,		# comparison operators
-	ast.IfExp,		# ternary 'x if cond else y'
+	ast.Expression, # Root wrapper for mode='eval'
+	ast.BinOp,	  # Binary operations: +, -, *, /, %, **
+	ast.UnaryOp,	# Unary operations: -x, +x
+	ast.operator,   # Base class matching Add, Sub, Mult, Div, Mod, Pow, etc.
+	ast.unaryop,	# Base class matching USub (-x), UAdd (+x)
+	ast.Num,		# Numbers (int, float, long)
+	ast.Name,	   # Variable/function identifiers: 'day', 'min', 'clamp'
+	ast.Load,	   # Identifier read context
+	ast.Call,	   # Function calls: clamp(...), min(...)
+	ast.Compare,	# Comparisons: ==, !=, <, <=, >, >=
+	ast.cmpop,	  # Base class matching Eq, NotEq, Lt, Gt, etc.
+	ast.IfExp,	  # Ternary expressions: 'x if cond else y'
+	ast.BoolOp,	 # Boolean expressions: 'a and b', 'x or y'
+	ast.boolop,	 # Base class matching And, Or
 )
 
+# / Constants
+
+# Global Variables
+
+LAST_PROGRAMMING_SCHEDULE = None # global variable to hold the last programming schedule
+last_telemetry = None # global variable to hold the last telemetry data
+
+# / Global Variables
 
 PLUGINS = {} # dictionary of loaded plugins
 
@@ -97,11 +101,7 @@ PLUGINS = {} # dictionary of loaded plugins
 #   they will register keywords of a "type"
 #   the will handle the keywords with a handle() function
 
-# /Constants
-
 # Initialize the broadcast state API
-
-broadcast_state.start() # Start the broadcast state API thread
 
 # --- State Manager Plugin Wrappers ---
 def api_update_main(state, media_type, file_path, position, volume=1.0, visible=True):
@@ -118,7 +118,6 @@ def api_set_submedia(layer_id, media_type, file_path, position, volume=1.0, visi
 
 def api_clear_submedia(layer_id):
 	broadcast_state.clear_submedia(layer_id)
-
 
 # below is the ReferenceDecoder class used to decode the settings file and resolve $ref references within the settings file,
 # allowing for more dynamic and reusable settings structures. It also keeps track of all objects it has decoded in a list 
@@ -206,8 +205,6 @@ def import_module_from_path(name, path):
 		# Python 2 way (imp)
 		import imp
 		return imp.load_source(name, path)
-
-import sys
 
 def load_plugins(plugin_dir):
 	"""
@@ -299,25 +296,14 @@ def printd(*args):
 	print(' '.join(str(arg) if not isinstance(arg, list) else str(arg) for arg in args))
 	print("")
 
-def report_file_not_found(source):
-	"""
-	When a file is deleted but still exists in the database, the web server will still attempt to balance it with existing files.
-	Reporting file not found errors helps identify missing files.
-
-	:param source: The path to the missing balanced source file.
-	:return: None
-	"""
-	url = "http://127.0.0.1/?" + urllib.urlencode({ 'returned_file_does_not_exists': source })
-	urlcontents = open_url(url)
-	
-
-def report_video_playback(source, vtype="video"):
+def report_video_playback(source, vtype="video", data=None):
 	"""
 	Reports the currently playing video or commercial to the local web server for logging purposes. 
 	Does nothing if debug mode is enabled.
 
 	:param source: The path to the video or commercial file being played.
 	:param type: A string indicating whether the source is a "video" or "commercial". Default is "video".
+	:param data: Additional data to include in the log entry.
 
 	:return: None
 	"""
@@ -337,6 +323,8 @@ def report_video_playback(source, vtype="video"):
 	if param:
 		if last_channel_name:
 			param += "&channel=" + urllib.quote_plus(ensure_string(last_channel_name))
+		if data:
+			param += "&data=" + urllib.quote_plus(ensure_string(data))
 		printd("Reporting to web server:", base_url + "?" + param)
 		contents = open_url(base_url + "?" + param)
 		printd("report_video_playback", contents, source)
@@ -363,6 +351,7 @@ def play_video(source, commercials, max_commercials_per_break, start_pos, bumper
 		return 2
 
 	global last_played_video_source 
+	global last_telemetry
 	comm_source = None 
 	if source==None: 
 		return 2
@@ -391,10 +380,10 @@ def play_video(source, commercials, max_commercials_per_break, start_pos, bumper
 
 		comm_player = None 
 		
-		print('Main video file:' + ensure_string(source))
+		print('Main media file:' + ensure_string(source))
 		print("")
 
-		report_video_playback(source, vtype)	
+		report_video_playback(source, vtype, last_telemetry)	
 		player_args = get_setting(["player_settings"], []) + ["--layer", "1"] 
 		player = OMXPlayer(source, args=player_args, dbus_name="omxplayer.player" + str(random.randint(0,999))) 
 		sleep(0.5) 
@@ -486,8 +475,8 @@ def play_video(source, commercials, max_commercials_per_break, start_pos, bumper
 										print("Commercial should be over by now, moving on...")
 										break
 
-									if get_setting(['debug'], False) == True and time.time() - comm_start_time > int(get_setting(["debug positon"], 999999, int)):
-										report_debug("COMM_PLAY_LOOP", ["Commercial has been playing for more than " + get_setting(["debug positon"],"-1") + " seconds, ending early"])
+									if get_setting(['debug'], False) == True and time.time() - comm_start_time > int(get_setting(["debug position"], 999999, int)):
+										report_debug("COMM_PLAY_LOOP", ["Commercial has been playing for more than " + get_setting(["debug position"],"-1") + " seconds, ending early"])
 										comm_player.stop()
 										break
 										
@@ -504,6 +493,7 @@ def play_video(source, commercials, max_commercials_per_break, start_pos, bumper
 											player.pause()
 									except:
 											printd("player hide/pause error")
+									sleep(0.1) 
 							except Exception as exce:
 								report_error("COMM_PLAY_LOOP", ["error", ensure_string(exce), "SOURCE", comm_source, traceback.format_exc()])
 							
@@ -586,21 +576,6 @@ def ensure_string(value):
 			report_error("ENSURE_STRING", ["Error converting value to string", str(e)])
 			return ""
 
-def convert_percentages(expr):
-	"""
-	Converts percentage values in a mathematical expression to their decimal equivalents.
-	
-	:param expr: A string containing a mathematical expression with percentage values.
-	:return: A string with percentage values converted to decimal.
-	"""
-
-	def repl(match):
-		num = float(match.group(1))
-		return str(num / 100.0)
-
-	# Match any number (int or float) followed by %
-	return re.sub(r'(\d+(?:\.\d+)?)%', repl, expr)
-
 def eval_equation(equation):
 	"""
 	Tries to evaluate a mathematical equation string and return the result.
@@ -619,17 +594,17 @@ def eval_equation(equation):
 			report_error("EVAL_EQUATION", ["Equation too long", equation])
 			return -2
 
-		# 1. Evaluate direct percentages first before passing to AST
+		# Evaluate direct percentages first before passing to AST
 		match = re.match(r'(\d+(?:\.\d+)?)%', equation.strip())
 		if match and match.end() == len(equation.strip()):
 			num = float(match.group(1))
 			if 0.0 <= num <= 100.0:
 				return float(num / 100.0)
 
-		# 2. Parse into an AST expression tree
+		# Parse into an AST expression tree
 		tree = ast.parse(equation, mode='eval')
 
-		# 3. Validate syntax against allowed nodes and convert ints to floats in-place
+		# Validate syntax against allowed nodes and convert ints to floats in-place
 		for node in ast.walk(tree):
 			if not isinstance(node, ALLOWED_AST_NODES):
 				report_error("EVAL_EQUATION", ["Disallowed syntax in equation", equation, type(node).__name__])
@@ -757,22 +732,6 @@ def get_short_month_name(month_number):
 	else:
 		raise ValueError("Month number must be in the range 1-12")
 
-def readkey():
-	"""
-	Reads a single key press from the terminal without waiting for Enter to be pressed.
-
-	:return: The character of the key pressed.
-	"""
-	import sys, tty, termios
-	fd = sys.stdin.fileno()
-	old = termios.tcgetattr(fd)
-	try:
-		tty.setraw(fd)
-		return sys.stdin.read(1)
-	finally:
-		termios.tcsetattr(fd, termios.TCSADRAIN, old)
-
-# Function to replace %MAXDAYS% with the correct number of days in the month
 def replace_special_words(date_str):
 	"""
 	Replaces special placeholders in the input string with their corresponding values based on the current date and time.
@@ -937,39 +896,46 @@ def is_within_range(data):
 	# Final Result: All conditions must be met
 	return date_within_range and time_within_range and year_within_range
 
-def calculate_fill_time(video_length, current_time, offset=0):
+def calculate_fill_time(video_length, current_time, offset=-15, max_ratio=0.35, feature_threshold=4500, max_fill_seconds=2700):
 	"""
-	Calculates the number of seconds needed to align a video's end time
-	to the next half-hour or top-of-the-hour mark, rolling forward if
-	the remaining time is less than 60 seconds.
+	Calculates commercial fill seconds required to align to the broadcast grid.
 
 	:param video_length: Length of the video in seconds.
-	:param current_time: Current time as a datetime object.
-	:return: Time in seconds required to reach the next interval.
+	:param current_time: A datetime object representing the current time.
+	:param offset: An optional offset in seconds to adjust the fill time (default is -15).
+	:param max_ratio: The maximum ratio of fill time to total window for feature expansion (default is 0.35).
+	:param feature_threshold: The minimum video length in seconds to consider for feature expansion (default is 4500).
+	:param max_fill_seconds: The maximum fill time in seconds (default is 2700).
+
+	:return: The calculated fill time in seconds, adjusted by the offset and clamped to a minimum of 0.
 	"""
-	# Extract current hour, minute, and second
-	curr_hour = current_time.hour
-	curr_minute = current_time.minute
-	curr_second = current_time.second
-	total_seconds_past_hour = (curr_minute * 60) + curr_second  # Seconds past the last full hour
+	sec_past_hour = (current_time.minute * 60) + current_time.second
+	projected_end = sec_past_hour + video_length
 
-	# Determine next alignment point
-	next_target_seconds = 1800 if total_seconds_past_hour < 1800 else 3600
+	# 1. Find earliest 30-minute grid boundary that physically fits the video
+	slot_target = 1800
+	while slot_target < projected_end:
+		slot_target += 1800
 
-	# Roll forward if necessary, ensuring we always land on a half-hour/full-hour boundary
-	while total_seconds_past_hour + video_length >= next_target_seconds:
-		next_target_seconds += 1800  # Move forward in 30-minute increments
+	# 2. Check if eligible for movie/feature slot expansion
+	if video_length >= feature_threshold:
+		next_slot_target = slot_target + 1800
+		total_window = next_slot_target - sec_past_hour
+		candidate_fill = next_slot_target - projected_end
 
-	# Calculate the remaining time to fill
-	fill_time = next_target_seconds - (total_seconds_past_hour + video_length)
+		expanded_ratio = float(candidate_fill) / float(total_window)
 
-	# If the remaining time is less than 60 seconds, roll forward again
-	if fill_time < 60:
-		next_target_seconds += 1800  # Move to the next half-hour/full-hour mark
-		fill_time = next_target_seconds - (total_seconds_past_hour + video_length)
+		if expanded_ratio <= max_ratio and candidate_fill <= max_fill_seconds:
+			slot_target = next_slot_target
 
-	return max(fill_time + offset, 0)  # Avoid negative values
+	# 3. Compute raw fill time
+	fill_time = slot_target - projected_end
 
+	# 4. Clamp by the absolute hard maximum fill ceiling
+	fill_time = min(fill_time, max_fill_seconds)
+
+	# 5. Apply hardware spawn offset
+	return max(fill_time + offset, 0)
 
 # Part of "repeatedly" feature set by minimum-before-repeat.
 # 	stores the last played time for files set to have minimum time between plays
@@ -1226,51 +1192,50 @@ def get_video_tag(video_file):
 		return matches[-1].split()[-1]
 	return None
 
-def generate_commercials_list(total_time_seconds, multiplier=50):
+def generate_commercials_list(total_time_seconds, multiplier=50, max_remaining_time=10, prefilled_list=None):
 	"""
-	Fills the given total time with randomly selected choices from a random commercial. 
+	Fills total_time_seconds with random commercials.
+	Enforces a minimum floor of 5s to prevent zero-result queries on micro-intervals.
+	"""
+	# Enforce absolute floor: no broadcast commercial exists under 5 seconds
+	floor = max(max_remaining_time, 10)
 
-	:param total_time_seconds: Total time in seconds.
-	:param multiplier: A multiplier to adjust the maximum time allowed to generate the list of commercials. Default is 50.
-	:return: A list of randomly selected commercials that (roughly) sum up to the total time.
-	"""
-	max_time_before_timeout = max(((float(total_time_seconds)/100) / 100) * multiplier, .1)
-	printd("Max time:", max_time_before_timeout)
-	remaining_time = total_time_seconds
-	selected_intervals = []
+	max_time_before_timeout = max(((float(total_time_seconds) / 100) / 100) * multiplier, .1)
 	gen_start_time = time.time()
 
-	while True:
-		c = get_random_commercial()
-		if c == None:
-			report_error("GEN_COMM_LIST", ["could not get a random commercial"])
-			continue
-		
-		cTime = get_length_from_file(c)
-		if cTime==None:
-			report_error("GEN_COMM_LIST", ["commercial file has no length", str(c)])		
-		
-		while(cTime == None):
-			c = get_random_commercial()
-			if c == None:
-				report_error("GEN_COMM_LOST", ["could not get a random commercial"])
-				continue
-			cTime = get_length_from_file(c)
-			if cTime==None:
-				report_error("GEN_COMM_LIST", ["commercial file has no length", str(c)])		
+	selected_intervals = list(prefilled_list) if prefilled_list else []
+	already_covered = sum(get_length_from_file(c) for c in selected_intervals if get_length_from_file(c))
+	remaining_time = total_time_seconds - already_covered
 
-	
-		if remaining_time - cTime > 1:
-			selected_intervals.append(c)
-			remaining_time -= cTime
-		
+	while True:
+		# Check timeout
 		if time.time() - gen_start_time > max_time_before_timeout:
 			printd("taking too long to generate commercials, stopping", remaining_time)
 			break
-		if remaining_time < 20:
-			printd("Remaining time:", remaining_time)
+
+		# Check tolerance floor
+		if remaining_time < floor:
+			printd("Remaining time within tolerance floor:", remaining_time)
 			break
-	random.shuffle(selected_intervals) # shuffle the list of commercials to randomize the order
+
+		c = get_random_commercial(max_length=remaining_time, tries=5)
+		if c is None:
+			printd("No commercial found under remaining time:", remaining_time)
+			break
+
+		if c in selected_intervals:
+			printd("Duplicate commercial found, skipping:", c)
+			continue
+
+		cTime = get_length_from_file(c)
+		if cTime == None or cTime <= 0:
+			report_error("GEN_COMM_LIST", ["commercial file has no length", str(c)])
+			continue
+
+		selected_intervals.append(c)
+		remaining_time -= cTime
+
+	random.shuffle(selected_intervals)
 	return selected_intervals
 
 def get_args(index):
@@ -1355,88 +1320,93 @@ def get_random_video_from_dir(dir):
 		report_error("GET_RND_VIDEO", ["##unexpected error##", str(valerr), traceback.format_exc()])
 		return None
 
-def get_random_commercial():
+def get_random_commercial(min_length=0, max_length=99999, tries=5):
 	"""
-	Returns a random commercial from the list of commercials in the settings file.
-	
+	Returns a random commercial from the list of commercials in the settings file,
+	respecting schedule min/max length overrides over caller parameters.
+
+	:param min_length: Minimum length in seconds. Defaults to 0.
+	:param max_length: Maximum length in seconds. Defaults to 99999.
 	:return: A random commercial file path or None if no commercials are found.
 	"""
 	global settings
-
-	try:
-		programming_schedule = check_video_times(settings['commercial_times'], get_current_channel()) # check to see if any commercials are scheduled
-		if programming_schedule == None:
-			#no specified commercials were set for this time perioid, even tho the settings suggests there might be
-			report_error("GET_RND_COMM", ["No commercials block found", "check settings.json file"]) #could be intentional, but we're going to report it just in case
-			return None
-
-		min_len=0
-		if 'min-length' in programming_schedule[4]:
-			min_len = programming_schedule[4]['min-length']
-			if not is_number(min_len): # check to see if the min-length is a number
-				report_error("COMMERCIALS", ["min-length is set but it is not a number", "check settings.json file", programming_schedule[4]])
-
-		max_len=99999 # 2 days worth of seconds
-		if 'max-length' in programming_schedule[4]:
-			max_len = programming_schedule[4]['max-length']
-			if not is_number(max_len): # check to see if the max-length is a number
-				report_error("COMMERCIALS", ["max-length is set but it is not a number", "check settings.json file", programming_schedule[4]])
-
-		folder = programming_schedule[0] # the results, if any, returns None type of not
-		if folder:
-			#commercials are scheduled, so let's gather the videos from the specified paths (could only be 1 or could be many)
-
-			# going to loop through all returned directories, replacing special keywords and validating that the directory does exist
-			new_folder=[] # temp list of new directories
-			for i in range(0, len(folder)):
-				tmp_folder = replace_all_special_words(folder[i]) # replace special keywords
-				if os.path.isdir(tmp_folder) == False: # folder doesn't exist
-					report_error("GET_RND_COMM", [folder, "directory does not exist", "check settings.json file"]) # report error that directory exist
-				else:
-					new_folder.append(tmp_folder) # add directories that do exist
-			
-			if len(new_folder)==0: # no directories exist
-				report_error("GET_RND_COMM", ["No searachble directories are found", "check settings.json file"])
+	while tries > 0:
+		tries -= 1
+		try:
+			programming_schedule = check_video_times(settings['commercial_times'], get_current_channel())
+			if programming_schedule is None:
+				report_error("GET_RND_COMM", ["No commercials block found", "check settings.json file"])
 				return None
-			
-			folder = new_folder # replace old folders with the newly verified folders
-			printd("get_random_commercial: ", "Verified commercial folders:", folder)
-			# settings wants the random video to be selected from multiple folders but prefers the random video come from the folders supplied rather than the combine contents of each folder
-			# this can help balance the types of videos played when supplying different folders where one type with more videos would be more randomly favored
-			folder_chance = None 
-			if 'prefer-folder' in programming_schedule[4]:
-				folder_chance = programming_schedule[4]['prefer-folder']
-			
-			if folder_chance != None: # check to see if the user has set a folder preference
-				if 'weighted' in programming_schedule[4]: # check to see if the user has set a weighted folder selection
-					if len(programming_schedule[4]['weighted']) != len(folder): # check to see if the weighted folder count matches the folder count
-						report_error("GET_RND_COMM", ["Weighted folder count supplied does not match folder count", "check settings.json file", programming_schedule[4]]) # report error if they don't match
-						random.shuffle(folder) # shuffle the list of folders to randomize the order
-						rfolder = random.choice(folder) # also if they don't match, just select a random folder
-					else:
-						rfolder = weighted_random_choice(folder, programming_schedule[4]['weighted']) # select a folder based on the weighted values
-						if rfolder == None:
-							report_error("GET_RND_COMM", ["Weighted folder selection failed", "check settings.json file", programming_schedule[4]]) # report error if the weighted values are invalid
-							random.shuffle(folder) # shuffle the list of folders to randomize the order
-							rfolder = random.choice(folder) # if the weighted values are invalid, just select a random folder
+
+			min_len = min_length
+			if 'min-length' in programming_schedule[4]:
+				sched_min = programming_schedule[4]['min-length']
+				if not is_number(sched_min):
+					report_error("COMMERCIALS", ["min-length is set but it is not a number", "check settings.json file", programming_schedule[4]])
 				else:
-					random.shuffle(folder) # shuffle the list of folders to randomize the order
-					rfolder = random.choice(folder) # if no weighted values are set, just select a random folder
-				
-				video = get_videos_from_dir_cached(replace_all_special_words(rfolder), min_len, max_len) # get the videos from the selected folder
-			else: # no folder preference set
-				video = get_videos_from_dir_cached(replace_all_special_words(folder[0]), min_len, max_len) # get the videos from the first folder in the list
-				for itemX in range(1,len(folder)): # loop through the rest of the folders
-					video = video + get_videos_from_dir_cached(replace_all_special_words(folder[itemX]), min_len, max_len) # add the videos from the folder to the list of videos
-			printd("get_random_commercial: ", "Commercial videos found:", len(video))
-			random.shuffle(video) # shuffle the list of videos to randomize the order
-			printd("get_random_commercial: ", "Shuffled: ", len(video))
-			printd("get_random_commercial: ", "Random: ", random.choice(video))
-			return random.choice(video) #return a random video from the combined paths
-	except Exception as valerr:
-		#an unknown error occurred, report it and return nothing		
-		report_error("GET_RND_COMM", ["##unexpected error##", "check settings.json file", str(valerr), traceback.format_exc(), programming_schedule if programming_schedule!=None else "no programming schedule"])
-		return None	
+					min_len = sched_min
+
+			max_len = max_length
+			if 'max-length' in programming_schedule[4]:
+				sched_max = programming_schedule[4]['max-length']
+				if not is_number(sched_max):
+					report_error("COMMERCIALS", ["max-length is set but it is not a number", "check settings.json file", programming_schedule[4]])
+				else:
+					max_len = sched_max
+
+			folder = programming_schedule[0]
+			if folder:
+				new_folder = []
+				for i in range(0, len(folder)):
+					tmp_folder = replace_all_special_words(folder[i])
+					if not os.path.isdir(tmp_folder):
+						report_error("GET_RND_COMM", [folder, "directory does not exist", "check settings.json file"])
+					else:
+						new_folder.append(tmp_folder)
+
+				if len(new_folder) == 0:
+					report_error("GET_RND_COMM", ["No searchable directories are found", "check settings.json file"])
+					return None
+
+				folder = new_folder
+				printd("get_random_commercial: ", "Verified commercial folders:", folder)
+
+				folder_chance = programming_schedule[4].get('prefer-folder')
+
+				if folder_chance is not None:
+					if 'weighted' in programming_schedule[4]:
+						if len(programming_schedule[4]['weighted']) != len(folder):
+							report_error("GET_RND_COMM", ["Weighted folder count supplied does not match folder count", "check settings.json file", programming_schedule[4]])
+							rfolder = random.choice(folder)
+						else:
+							rfolder = weighted_random_choice(folder, programming_schedule[4]['weighted'])
+							if rfolder is None:
+								report_error("GET_RND_COMM", ["Weighted folder selection failed", "check settings.json file", programming_schedule[4]])
+								rfolder = random.choice(folder)
+					else:
+						rfolder = random.choice(folder)
+
+					video = get_videos_from_dir_cached(replace_all_special_words(rfolder), min_len, max_len)
+				else:
+					video = []
+					for itemX in folder:
+						video.extend(get_videos_from_dir_cached(replace_all_special_words(itemX), min_len, max_len))
+
+				printd("get_random_commercial: ", "Commercial media found:", len(video))
+
+				if video:
+					return random.choice(video)
+
+				# If this attempt found no matches, log a quiet debug notice and let the loop retry
+				printd("get_random_commercial: ", "No media found in folder under max length %s, retrying (%s left)..." % (max_len, tries))
+
+		except Exception as valerr:
+			report_error("GET_RND_COMM", ["##unexpected error##", "check settings.json file", str(valerr), traceback.format_exc(), programming_schedule if programming_schedule is not None else "no programming schedule"])
+			continue
+
+	# Only report an error if every single attempt failed
+	report_error("GET_RND_COMM", ["No commercial videos matched length criteria after retries", "min: %s, max: %s" % (min_len, max_len)])
+	return None	
 
 def get_current_channel():
 	"""Returns the current channel name based on settings or external file."""
@@ -1548,18 +1518,33 @@ def is_cache_valid(cache_path, dir_path):
 		return False
 
 def set_pi_permissions(path):
-	"""Ensure pi:pi ownership and appropriate permissions in Python 2."""
-	try:
-		if os.geteuid() == 0:
-			os.chown(path, 1000, 1000)
+	"""
+	Ensure pi:pi ownership and appropriate permissions in Python 2 only when needed.
+	
+	:param path: The file or directory path to set permissions for.
 
-		if os.path.isdir(path):
-			os.chmod(path, 0775)
-		else:
-			os.chmod(path, 0664)
+	:return: None
+	"""
+	try:
+		if not os.path.exists(path):
+			return
+
+		stat_info = os.stat(path)
+		is_dir = stat_info.st_mode & 0040000  # S_ISDIR check
+
+		# Only chown if running as root AND ownership is not already 1000:1000
+		if os.geteuid() == 0:
+			if stat_info.st_uid != 1000 or stat_info.st_gid != 1000:
+				os.chown(path, 1000, 1000)
+
+		# Check permission bits (dirs: 0775, files: 0664)
+		target_mode = 0775 if is_dir else 0664
+		current_mode = stat_info.st_mode & 0777
+		if current_mode != target_mode:
+			os.chmod(path, target_mode)
+
 	except Exception as e:
 		report_error("SET_PI_PERMISSIONS", ["Warning: set_pi_permissions failed on %s: %s" % (path, str(e))])
-
 
 def get_files_from_dir(dir_path, extensions=VIDEO_EXTENSIONS, min_length=GET_VIDEOS_FROM_DIR_MIN_DURATION, max_length=GET_VIDEOS_FROM_DIR_MAX_DURATION):
 	"""
@@ -1653,19 +1638,19 @@ def get_videos_from_dir_cached(dir_path, min_length=GET_VIDEOS_FROM_DIR_MIN_DURA
 		return []
 
 	global _cached_get_videos_from_dir
-	now = time.time()
+	nowz = time.time()
 
 	cache_key = (dir_path, min_length, max_length)
 	cache_entry = _cached_get_videos_from_dir.get(cache_key)
 
 	# Use cached data if it exists and is recent
-	if cache_entry and now - cache_entry['timestamp'] < 120:  # 2 min freshness window
+	if cache_entry and nowz - cache_entry['timestamp'] < 120:  # 2 min freshness window
 		return cache_entry['results']
 
 	# Otherwise, refresh from disk
 	results = get_files_from_dir(dir_path, filter, min_length, max_length)
 	_cached_get_videos_from_dir[cache_key] = {
-		'timestamp': now,
+		'timestamp': nowz,
 		'results': results
 	}
 	return results
@@ -1706,7 +1691,14 @@ def is_dict(var):
 holidays = [ "thanksgiving", "xmas", "halloween", "mothers day", "fathers day", "memorial day", "easter", "new years day", "mlk day", "valentines day", "presidents day", "st patricks day", "april fools day", "independence day", "4th of july", "labor day", "columbus day", "veterans day", "christmas eve", "new years eve" ]
 
 def get_holiday_datetime(holiday, year=None):
-	"""Calculates Thanksgiving (4th Thursday of Nov) for a given year."""
+	"""
+	Calculates Thanksgiving (4th Thursday of Nov) for a given year.
+	
+	:param holiday: The name of the holiday to calculate.
+	:param year: The year to calculate the holiday for. If None, uses the current year
+
+	:return: A datetime object representing the holiday date and time, or -1 if the holiday is not recognized.
+	"""
 	global now
 	search_year = year if year is not None else now.year
 	holiday = holiday.lower().replace(" ", "")
@@ -1894,6 +1886,7 @@ def is_special_time(check):
 	return False
 
 def kill_omxplayer():
+	"""	Kills the omxplayer process using sudo pkill command. """
 	command = "/usr/bin/sudo pkill omxplayer"
 	process = subprocess.Popen(command.split(), stdout=subprocess.PIPE)
 	output = process.communicate()[0]
@@ -2028,48 +2021,6 @@ def restart():
 	output = process.communicate()[0]
 	print(output)
 
-def returncleanASCII(s):
-	"""
-	Removes non-ASCII characters except '%', improving efficiency.
-	
-	:param s: The string to clean.
-	:return: The cleaned string with only ASCII characters and '%'
-	"""
-	s = ensure_string(s)  # Ensure input is a string
-	if not isinstance(s, str):
-		report_error("RETURN_CLEAN_ASCII", ["Input is not a string"])
-		return ""
-	# Use a generator expression to filter out non-ASCII characters
-	return s #"".join(c for c in s if 32 <= ord(c) <= 127 or c == '%')
-
-def search_videos_within_range(file_list, start_num, end_num):
-	"""
-	Searches a list for file names containing %T(NUM)% where NUM is in range.
-	
-	:param file_list: List of file names to search.
-	:param start_num: Starting number for the range.
-	:param end_num: Ending number for the range.
-	:return: List of file names that match the pattern and are within the range.
-	"""
-	if start_num is None or end_num is None:
-		return file_list
-
-	if start_num > end_num:
-		report_error("SEARCH_VIDEOS", ["Invalid range: start_num > end_num", start_num, end_num])
-		return []
-	
-	pattern = re.compile(r'%T\((\d+)\)%')
-	matching_files = []
-
-	for filename in file_list:
-		match = pattern.search(filename)
-		if match:
-			num = int(match.group(1))  # Extract NUM
-			if start_num <= num <= end_num:  # Check range
-				matching_files.append(filename)
-
-	return matching_files
-
 def spread_division(total, parts):
 	"""
 	Distributes the total into parts as evenly as possible.
@@ -2127,9 +2078,7 @@ def update_settings():
 
 	f.close()
 
-	#repeatedly_reset() # since settings have been updated, reset "repeatedly" tracked times
-
-	settings['load_time'] = os.path.getmtime(settings_file)
+	settings['load_time'] = os.path.getmtime(settings_file) # store the last modified time of the settings file in the settings variable for later use
 
 	if 'version' in settings:
 		if is_number(settings['version']):
@@ -2157,92 +2106,11 @@ def weighted_random_choice(items, percentages):
 	"""
 	Selects a random item from a list based on the given percentages.
 
-	Args:
-	items (list): List of items to choose from.
-	percentages (list): List of percentages corresponding to the items.
+	:items: List of items to choose from.
+	:percentages: List of percentages corresponding to the items.
 
-	Returns:
-	A randomly selected item from the list.
+	:returns: A randomly selected item from the list.
 	"""
-	if len(items) != len(percentages):
-		#raise ValueError("The number of items and percentages must match.")
-		return None
-
-	if sum(percentages) != 100:
-		#raise ValueError("The percentages must add up to 100.")
-		return None
-
-	# Create a cumulative distribution
-	cumulative_distribution = []
-	cumulative_sum = 0
-
-	for percent in percentages:
-		cumulative_sum += percent
-		cumulative_distribution.append(cumulative_sum)
-
-	# Generate a random number between 0 and 100
-	random_number = random.uniform(0, 100)
-
-	# Select the item based on the random number and cumulative distribution
-	for i, threshold in enumerate(cumulative_distribution):
-		if random_number <= threshold:
-			return items[i]
-
-def weighted_random_choice_auto(items, percentages):
-	"""
-	Selects a random item from a list based on the given percentages.
-
-	Args:
-	items (list): List of items to choose from.
-	percentages (list): List of percentages corresponding to the items or can be set to the string 'auto'.
-
-
-	Returns:
-	A randomly selected item from the list.
-	"""
-
-	# If percentages is set to 'auto', we will automatically calculate the percentages based on the number of files in the items, which point to directories.
-	# Then we can sent the percentages var based on those values and continue as normal.
-	# This is useful for randomly selecting from a list of directories where the number of files in each directory should determine the chances of it being selected.
-
-	if isinstance(percentages, basestring) and percentages.lower() == 'auto':
-		counts = []
-		total_files = 0
-		for item in items:
-			if os.path.isdir(item):
-				num_files = len(get_videos_from_dir_cached(item))
-				counts.append(num_files)
-				total_files += num_files
-			else:
-				counts.append(0) 
-
-		if total_files > 0:
-			# Multiply by 100 before dividing to handle integer division in Python 2.7
-			percentages = [(c * 100) / total_files for c in counts]
-			
-			# Largest Remainder Method: Distribute the losing remainders to guarantee exactly 100%
-			remainder = 100 - sum(percentages)
-			if remainder > 0:
-				# Sort indices by their modulo remainder descending
-				rem_indices = sorted(
-					range(len(counts)), 
-					key=lambda i: (counts[i] * 100) % total_files, 
-					reverse=True
-				)
-				for i in range(remainder):
-					percentages[rem_indices[i]] += 1
-		else:
-			# Equal integer distribution if no files are found
-			num_items = len(items)
-			if num_items > 0:
-				base = 100 / num_items
-				remainder = 100 % num_items
-				percentages = [base] * num_items
-				for i in range(remainder):
-					percentages[i] += 1
-			else:
-				percentages = []
-
 	if len(items) != len(percentages):
 		#raise ValueError("The number of items and percentages must match.")
 		return None
@@ -2551,14 +2419,14 @@ def select_video_from_schedule(schedule):
 		printd("No folder preference. Aggregating videos from all folders.")
 		videos = []
 		for folder in valid_folders:
-			printd("Loading videos from:", folder)
+			printd("Loading media from:", folder)
 			videos += get_videos_from_dir_cached(folder, min_len, max_len)
 
 	if not videos:
-		report_error("PROGRAMMING", ["No videos found after length filter"])
+		report_error("PROGRAMMING", ["No media found after length filter"])
 		return None
 
-	printd("Total videos selected:", len(videos))
+	printd("Total files selected:", len(videos))
 	return videos
 
 def resolve_video_by_type(schedule, folders):
@@ -2727,6 +2595,46 @@ def resolve_video_by_type(schedule, folders):
 		else:
 			exit()
 
+def create_fresh_telemetry():
+	"""
+	Constructs an empty, default telemetry dictionary ready to be populated.
+	Returns a Python dict matching the broadcast telemetry schema.
+	"""
+	telemetry = {
+		"start_time": None,		 # Formatted string "HH:MM:SS" when playback initiates
+		"show_length": 0,		   # Declared tag runtime of the main media file in seconds
+		"target_boundary": None,	# Formatted string "HH:MM:SS" target (e.g., :00 or :30)
+		"calc_fill": 0,			 # Target fill seconds calculated by calculate_fill_time
+		"offset_used": 0,		   # Negative hardware delay offset applied (e.g., -15)
+		"break_count": 0,		   # Number of commercial pods scheduled in this show
+		"bumpers_in": [],		   # List of integer durations for 'in' bumpers (e.g., [5, 5])
+		"bumpers_out": [],		  # List of integer durations for 'out' bumpers (e.g., [5, 5])
+		"commercials": [],		  # List of integer durations for selected ads (e.g., [30, 15, 30])
+		"commercials_sum": 0,	   # Summed total of all tagged commercial durations in seconds
+		"script_pauses": 0,		  # Total seconds of script-induced pauses (e.g., for buffering)
+		"planned_total_window": 0   # Total calculated package duration (show + bumpers + ads)
+	}
+	return telemetry
+
+def set_telemetry(key, value):
+	"""
+	Sets a single key-value pair in the global last_telemetry dictionary.
+	Initializes a fresh telemetry structure if one does not already exist.
+
+	:param key: String key matching the telemetry schema.
+	:param value: The value to set (int, str, list, etc.).
+	:return: None
+	"""
+	global last_telemetry
+
+	if last_telemetry is None:
+		last_telemetry = create_fresh_telemetry()
+
+	if key in last_telemetry:
+		last_telemetry[key] = value
+	else:
+		printd("set_telemetry warning: Unknown telemetry key '%s'" % str(key))
+
 def prepare_commercials_and_bumpers(source, schedule):
 	"""
 	Determines how many commercials to insert and whether to use bumpers.
@@ -2737,6 +2645,8 @@ def prepare_commercials_and_bumpers(source, schedule):
 	"""
 	global current_video_tag
 	global LAST_PROGRAMMING_SCHEDULE
+	global last_telemetry
+	global now
 
 	meta = schedule[4]
 	video_type = schedule[2]
@@ -2745,6 +2655,8 @@ def prepare_commercials_and_bumpers(source, schedule):
 	commercials = get_commercials(source)
 	bumpers = None
 	pregenerated_commercials_list = None
+	# Keep now's simulated date/hour/minute, but attach real-world seconds
+	actual_now = now.replace(second=datetime.datetime.now().second)
 
 	# Handle tag override
 	if 'set-tag' in meta:
@@ -2808,31 +2720,150 @@ def prepare_commercials_and_bumpers(source, schedule):
 				len(commercials) + 1,
 				bumpers_in_chance,
 				bumpers_out_chance
-		 )
+			)
 			printd("Bumpers generated:", bumpers)
 
 		if source_total_length is None:
-			report_error("COMM_BREAK", ["length of video could not be found", "SOURCE", source])
+			report_error("COMM_BREAK", ["length of media file could not be found", "SOURCE", source])
 			return (0, None, bumpers)
 
+		offset_val = get_setting(["commercials_offset_time"], 0)
 		fill_time = calculate_fill_time(
 			source_total_length,
-			now,
-			get_setting(["commercials_offset_time"], 0)
+			actual_now,
+			offset_val
 		)
 
 		printd("Fill time calculated:", fill_time)
 
+		# Baseline plan telemetry
+		set_telemetry("start_time", actual_now.strftime("%H:%M:%S"))
+		set_telemetry("show_length", source_total_length)
+		set_telemetry("calc_fill", fill_time)
+		set_telemetry("offset_used", offset_val)
+		set_telemetry("break_count", len(commercials))
+
+		# Target boundary calculation (:00 or :30)
+		target_end_dt = actual_now + datetime.timedelta(seconds=(source_total_length + fill_time))
+		set_telemetry("target_boundary", target_end_dt.strftime("%H:%M:%S"))
+
+		# Track bumper lengths
+		b_in_lengths = []
+		b_out_lengths = []
 		if bumpers:
 			fill_time -= (bumpers['in_total'] + bumpers['out_total'])
 			printd("Adjusted fill time after bumpers:", fill_time)
 
+			if 'in' in bumpers and isinstance(bumpers['in'], list):
+				b_in_lengths = [get_length_from_file(b) for b in bumpers['in'] if b]
+			if 'out' in bumpers and isinstance(bumpers['out'], list):
+				b_out_lengths = [get_length_from_file(b) for b in bumpers['out'] if b]
+
+		set_telemetry("bumpers_in", b_in_lengths)
+		set_telemetry("bumpers_out", b_out_lengths)
+
+		total_bumper_clips = len(b_in_lengths) + len(b_out_lengths)
+
+		# --- PASS 1: Base Generation (Standard 10s cutoff) ---
 		pregenerated_commercials_list = generate_commercials_list(
-			fill_time,
-			get_setting(["commercials_fill_time_multiplier"], 50)
+			total_time_seconds=fill_time,
+			multiplier=get_setting(["commercials_fill_time_multiplier"], 50),
+			max_remaining_time=10
 		)
 
-		printd("Pregenerated commercials list:", pregenerated_commercials_list)
+		delay_modifier = get_setting(["commercials_delay_modifier"], 0.75) # calibrated transition overhead per clip
+
+		# --- PASS 2: Reconcile Known Script Pauses and Hardware Latencies ---
+		if pregenerated_commercials_list:
+			break_count = len(commercials)
+		
+			if not is_number(delay_modifier):
+				report_error("PREPARE COMM AND BUMP", ["commercials_delay_modifier, number expected", ensure_string(delay_modifier)])
+				delay_modifier = 0.75
+			else:
+				delay_modifier = float(delay_modifier)
+
+			# Fixed break entry sleep (0.5s) + transition overhead for all media files (commercials + bumpers)
+			total_media_clips = len(pregenerated_commercials_list) + total_bumper_clips
+			script_delay = (break_count * 0.5) + (total_media_clips * delay_modifier)
+			
+			# If the cumulative sleep is 10s or more, trim from bottom and backfill
+			if script_delay >= 10.0:
+				printd("[PASS 2] Script pause overhead detected:", script_delay)
+				
+				# Sort current clips by length ascending (smallest first)
+				pregenerated_commercials_list.sort(key=lambda c: get_length_from_file(c))
+				
+				accumulated_trim = 0.0
+				while pregenerated_commercials_list and accumulated_trim < script_delay:
+					removed_clip = pregenerated_commercials_list.pop(0)
+					accumulated_trim += get_length_from_file(removed_clip)
+					# Removing a clip also recovers its individual transition latency
+					script_delay -= delay_modifier
+				
+				printd("[PASS 2] Trimmed clips totaling %ds to offset %0.1fs script delay" % (accumulated_trim, script_delay))
+
+				# Calculate the exact net media target needed to close the remaining gap:
+				# Net Target = (Original Target - Remaining Script Pauses)
+				net_media_target = int(round(fill_time - script_delay))
+				
+				# Re-run the generator with tight 2s abandon cutoff, passing prefilled list
+				pregenerated_commercials_list = generate_commercials_list(
+					total_time_seconds=net_media_target,
+					multiplier=get_setting(["commercials_fill_time_multiplier"], 50),
+					max_remaining_time=2,
+					prefilled_list=pregenerated_commercials_list
+				)
+
+		printd("Final pregenerated commercials list:", pregenerated_commercials_list)
+
+		# Track selected commercials and total planned broadcast window
+		comm_lengths = []
+		if pregenerated_commercials_list:
+			comm_lengths = [get_length_from_file(c) for c in pregenerated_commercials_list if c]
+
+		comm_sum = sum(comm_lengths)
+		bumper_sum = sum(b_in_lengths) + sum(b_out_lengths)
+		
+		# Exact known pauses and hardware execution delays: breaks + (commercials + bumpers)
+		total_script_pauses = (len(commercials) * 0.5) + ((len(comm_lengths) + total_bumper_clips) * delay_modifier)
+
+		set_telemetry("commercials", comm_lengths)
+		set_telemetry("commercials_sum", comm_sum)
+		set_telemetry("script_pauses", total_script_pauses)
+		# Real planned window = Video + Bumpers + Ads + Script pauses & transition latencies
+		set_telemetry("planned_total_window", source_total_length + bumper_sum + comm_sum + total_script_pauses)
+
+		# --- AUDIT: Verify generated commercial package against true net target ---
+		# If Pass 2 ran, the real target is net_media_target; otherwise it is fill_time
+		expected_target = net_media_target if 'net_media_target' in locals() else fill_time
+		actual_comm_fill = sum(comm_lengths) if comm_lengths else 0.0
+		fill_delta = expected_target - actual_comm_fill
+
+		# Trigger only on actual anomalies (shortfall greater than 45 seconds)
+		if fill_delta > 45.0:
+			audit_report = [
+				"=== [COMMERCIAL FILL UNDERFLOW AUDIT] ===",
+				"Source File: %s" % source,
+				"Show Length: %s" % source_total_length,
+				"Target Boundary: %s | Start Time: %s" % (target_end_dt.strftime("%H:%M:%S"), actual_now.strftime("%H:%M:%S")),
+				"Expected Net Comm Fill: %0.1fs | Actual Comm Fill: %0.1fs | Shortfall: %0.1fs" % (expected_target, actual_comm_fill, fill_delta),
+				"Active Video Tag: '%s' (Meta 'set-tag': '%s', Filename Tag: '%s')" % (
+					current_video_tag,
+					meta.get('set-tag', 'None'),
+					source_tag
+				),
+				"Break Count: %d | Script Pauses: %0.1fs" % (len(commercials), total_script_pauses),
+				"Bumper Count: %d | Bumper Seconds: %0.1fs" % (total_bumper_clips, bumper_sum),
+				"Selected Clips Count: %d" % len(comm_lengths),
+				"Selected Clips: %s" % str(comm_lengths),
+				"Pass 2 Script Delay: %s" % (str(script_delay) if 'script_delay' in locals() else "N/A"),
+				"========================================="
+			]
+			for line in audit_report:
+				printd(line)
+			report_error("COMM_FILL_GAP", audit_report)
+
 		return (0, pregenerated_commercials_list, bumpers)
 
 	if not is_number(settings['commercials_per_break']):
@@ -2841,8 +2872,6 @@ def prepare_commercials_and_bumpers(source, schedule):
 
 	printd("Fixed commercial count mode. Count:", settings['commercials_per_break'])
 	return (int(settings['commercials_per_break']), None, None)
-
-import threading
 
 def _run_startup_workers(worker_list):
 	"""
@@ -2875,7 +2904,7 @@ def onStartup():
 		Performs startup tasks such as reporting that the script is running.
 		:return: None
 	"""
-
+	broadcast_state.start() # Start the broadcast state API thread
 	report_error("STARTUP", ["Script is now running!", "Script Version: " + ensure_string(SCRIPT_VERSION), "Settings version: " + ensure_string(SETTINGS_VERSION)])
 	
 	# Wait up to 30 seconds for the web server to accept HTTP requests on boot
@@ -2905,9 +2934,11 @@ onStartup() # Call the onStartup function to report that the script has started
 
 while True:
 	try:
+		last_telemetry = create_fresh_telemetry() # Reset telemetry for each loop iteration
+
 		# Error channel timeout
 		if (time.time() - start_time) > 59 and error_channel_set: # if an error channel is set and no video has played in 60 seconds, exit script
-			report_error("MAIN_LOOP", [	"Error channel was set but no video is playing.", "Check settings.json for proper error channel.", "Ensure error channel directory exists and has videos.", "Script will now exit."	])
+			report_error("MAIN_LOOP", [	"Error channel was set but nothing is playing.", "Check settings.json for proper error channel.", "Ensure error channel directory exists and has media files.", "Script will now exit."	])
 			exit()
 
 		# No video played timeout
@@ -2963,14 +2994,14 @@ while True:
 			continue
 
 		if video is None or len(video) == 0:
-			report_error("PLAY", ["No videos found", "Looked: " + str(programming_schedule[0]), "Programing", programming_schedule])
+			report_error("PLAY", ["No media files found", "Looked: " + str(programming_schedule[0]), "Programing", programming_schedule])
 			printd("No videos returned from 'resolve_video_by_type'")
 			continue
 
 		# Select final source
 		source = random.choice(video)
 		if source is None:
-			report_error("PLAY", ["No source video selected", programming_schedule[0], programming_schedule[1], programming_schedule[2]])
+			report_error("PLAY", ["No source media selected", programming_schedule[0], programming_schedule[1], programming_schedule[2]])
 			printd("Source selection failed")
 			continue
 
@@ -2986,6 +3017,7 @@ while True:
 		play_video_attempts = 0
 		max_attempts = get_setting(['max_play_attempts'], 1)
 		while(success == 0 and play_video_attempts < max_attempts):
+			printd("Last Telemetry:", last_telemetry)
 			success = play_video(
 				source,
 				get_commercials(source),
@@ -3009,7 +3041,7 @@ while True:
 			printd("Registered playback for:", programming_schedule[4])
 
 		if error_channel_set:
-			report_error("MAIN_LOOP", ["Exited Error Channel mode, video played successfully"])
+			report_error("MAIN_LOOP", ["Exited Error Channel mode, media played successfully"])
 			error_channel_set = False
 			channel_name_static = None
 			printd("Error channel cleared")
