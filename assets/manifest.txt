@@ -44,6 +44,8 @@ sync:html/manage/Database.php->/var/www/html/manage/Database.php
 sync:html/manage/FilesSystem.php->/var/www/html/manage/FilesSystem.php
 sync:html/manage/FlaggedCommercials.php->/var/www/html/manage/FlaggedCommercials.php
 sync:html/manage/FlaggedVideos.php->/var/www/html/manage/FlaggedVideos.php
+sync:html/manage/MainSettings.php->/var/www/html/manage/MainSettings.php
+sync:html/manage/MainSettings.schema.json->/var/www/html/manage/MainSettings.schema.json
 sync:html/manage/MountedDrivesManager.php->/var/www/html/manage/MountedDrivesManager.php
 sync:html/manage/Plugins.php->/var/www/html/manage/Plugins.php
 sync:html/manage/Takeout.php->/var/www/html/manage/Takeout.php
