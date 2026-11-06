@@ -1107,7 +1107,7 @@ if(isset($_GET["get_next_episode"])) {
 	die("$next_file|1|next episode");
 }
 
-function logPlayback($mysqli, $current_video, $parsedShows, $channel = null, $debug = false, $timestamp_override = null) {
+function logPlayback($mysqli, $current_video, $parsedShows, $channel = null, $debug = false, $timestamp_override = null, $data = null) {
 
 	if ($channel === null) {
 		$channel = getCurrentChannel();
@@ -1127,10 +1127,10 @@ function logPlayback($mysqli, $current_video, $parsedShows, $channel = null, $de
 	}
 
 	$stmt_insert = $mysqli->prepare("
-		INSERT INTO played (short_name, name, played, channel)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO played (short_name, name, played, data, channel)
+		VALUES (?, ?, ?, ?, ?)
 	");
-	$stmt_insert->bind_param("ssis", $show_name, $current_video, $timestamp, $channel);
+	$stmt_insert->bind_param("ssiss", $show_name, $current_video, $timestamp, $data, $channel);
 	$stmt_insert->execute();
 	$stmt_insert->close();
 }
@@ -1345,9 +1345,10 @@ function formatChannelName($ch) {
 if (isset($_GET["current_video"])) {
 	$current_video = urldecode($_GET["current_video"]);
 	$channel       = $_GET["channel"] ?? null;
+	$data       = $_GET["data"] ?? null;
 	$debug         = isset($_GET["d"]);
 
-	logPlayback($mysqli, $current_video, $parsedShows, $channel, $debug);
+	logPlayback($mysqli, $current_video, $parsedShows, $channel, $debug, null, $data);
 	
 	exit("1");
 }
