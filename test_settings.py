@@ -14,19 +14,23 @@ import hashlib					# for generating hash IDs
 import ast						# for safely evaluating mathematical expressions
 
 # Allowed AST nodes for safe evaluation of mathematical expressions
+import ast
+
 ALLOWED_AST_NODES = (
-	ast.Expression,
-	ast.BinOp,		# +, -, *, /, %
-	ast.UnaryOp,	  # -x, +x
-	ast.operator,	 # Add, Sub, Mult, Div, etc.
-	ast.unaryop,	  # USub, UAdd
-	ast.Num,		  # Python 2 numbers (int, float)
-	ast.Name,		 # variable lookups like 'hour', 'day'
-	ast.Load,		 # context for variable lookups
-	ast.Call,		 # function calls like sin(), clamp()
-	ast.Compare,	  # ==, !=, <, >, <=, >=
-	ast.cmpop,		# comparison operators
-	ast.IfExp,		# ternary 'x if cond else y'
+    ast.Expression, # Root wrapper for mode='eval'
+    ast.BinOp,      # Binary operations: +, -, *, /, %, **
+    ast.UnaryOp,    # Unary operations: -x, +x
+    ast.operator,   # Base class matching Add, Sub, Mult, Div, Mod, Pow, etc.
+    ast.unaryop,    # Base class matching USub (-x), UAdd (+x)
+    ast.Num,        # Numbers (int, float, long)
+    ast.Name,       # Variable/function identifiers: 'day', 'min', 'clamp'
+    ast.Load,       # Identifier read context
+    ast.Call,       # Function calls: clamp(...), min(...)
+    ast.Compare,    # Comparisons: ==, !=, <, <=, >, >=
+    ast.cmpop,      # Base class matching Eq, NotEq, Lt, Gt, etc.
+    ast.IfExp,      # Ternary expressions: 'x if cond else y'
+    ast.BoolOp,     # Boolean expressions: 'a and b', 'x or y'
+    ast.boolop,     # Base class matching And, Or
 )
 
 output_print = []
