@@ -1,5 +1,5 @@
 version:2
-date:2026/10/28
+date:2026/11/06
 
 # clean up old/deprecated files
 remove:/home/pi/Desktop/_rnd80s.py
