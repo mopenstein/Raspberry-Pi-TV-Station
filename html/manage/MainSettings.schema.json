@@ -1,0 +1,143 @@
+{
+	"items": [
+		{
+			"key": "version",
+			"label": "Version",
+			"type": "float",
+			"nullable": false,
+			"warn": "Changing this might have unintended consequences.",
+			"description": "Version of supported settings."
+		},
+		{
+			"key": "drive",
+			"label": "Drives",
+			"type": "list",
+			"nullable": false,
+			"description": "Root mount directories mapped to %D[n]% macros."
+		},
+		{
+			"key": "name",
+			"label": "Name",
+			"type": "text",
+			"nullable": false,
+			"max-length": 200,
+			"description": "Name of Station."
+		},
+		{
+			"key": "insert_commercials",
+			"label": "Insert Commercials",
+			"type": "bool",
+			"nullable": false,
+			"description": "Enables automatic insertion of commercials and bumpers."
+		},
+		{
+			"key": "max_play_attempts",
+			"label": "Max Play Attempts",
+			"type": "number",
+			"nullable": false,
+			"min": 1,
+			"max": 10,
+			"description": "Consecutive playback retry attempts before failure."
+		},
+		{
+			"key": "commercials_per_break",
+			"label": "Commercials Per Break",
+			"type": "dropdown",
+			"nullable": false,
+			"options": ["auto", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+			"description": "Target boundary fill ('auto') or fixed spot count."
+		},
+		{
+			"key": "commercials_delay_modifier",
+			"label": "Commercials Delay Modifier",
+			"type": "float",
+			"nullable": true,
+			"min": 0.0,
+			"max": 100.0,
+			"description": "Real world delay multiplier for media transition overhead (0.5s default)."
+		},
+		{
+			"key": "commercials_fill_time_multiplier",
+			"label": "Commercials Fill Time Multiplier",
+			"type": "number",
+			"nullable": false,
+			"min": 1,
+			"max": 100,
+			"description": "Timeout multiplier during dynamic break assembly."
+		},
+		{
+			"key": "commercials_offset_time",
+			"label": "Commercials Offset Time",
+			"type": "number",
+			"nullable": false,
+			"min": -300,
+			"max": 300,
+			"description": "Seconds added or subtracted from fill duration for boundary alignment."
+		},
+		{
+			"key": "time_test",
+			"label": "Time Test",
+			"type": "text",
+			"nullable": true,
+			"description": "Overrides system wall clock for testing (null for live operations)."
+		},
+		{
+			"key": "debug",
+			"label": "Debug",
+			"type": "bool",
+			"nullable": false,
+			"description": "Enables verbose messages in terminal and rapid schedule testing."
+		},
+		{
+			"key": "debug position",
+			"label": "Debug Position",
+			"type": "number",
+			"nullable": false,
+			"min": 0,
+			"max": 9999999,
+			"description": "Max seconds a video or ad plays before skipping ahead in debug mode."
+		},
+		{
+			"key": "report_data",
+			"label": "Report Data",
+			"type": "bool",
+			"nullable": false,
+			"description": "Enables logging errors, playbacks, and status back to server."
+		},
+		{
+			"key": "daily reboot",
+			"label": "Daily Reboot",
+			"type": "bool",
+			"nullable": false,
+			"description": "Reboots system between 2:00 AM and 4:00 AM once uptime exceeds 5.7 hours."
+		},
+		{
+			"key": "random video on first play",
+			"label": "Random Video On First Play",
+			"type": "bool",
+			"nullable": false,
+			"description": "Ordered shows pick a random start episode on their first run."
+		},
+		{
+			"key": "player_settings",
+			"label": "Player Settings",
+			"type": "list",
+			"nullable": false,
+			"description": "Command-line arguments passed directly to the media player."
+		},
+		{
+			"key": "plugins directory",
+			"label": "Plugins Directory",
+			"type": "text",
+			"nullable": true,
+			"description": "Path to external Python plugin scripts."
+		},
+		{
+			"key": "cache_path",
+			"label": "Cache Path",
+			"type": "text",
+			"nullable": false,
+			"description": "Directory used to store disk scan directory caches."
+		}
+	]
+}
