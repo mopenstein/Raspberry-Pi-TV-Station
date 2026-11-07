@@ -111,7 +111,6 @@ $has_ui = $show_play || $show_stop || $show_fullscreen;
         
         let isActive = <?= $autoplay ? 'true' : 'false' ?>;
         let pollInterval = null;
-        const SYNC_THRESHOLD_SECONDS = 1;
         const submediaPool = {};
 
         if (isActive) {
@@ -200,14 +199,14 @@ $has_ui = $show_play || $show_stop || $show_fullscreen;
                 syncMediaNode(mainVideo, data.main);
 
                 const overrideKeys = Object.keys(data.overrides || {});
-				if (overrideKeys.length > 0) {
-					syncMediaNode(overrideVideo, data.overrides[overrideKeys[0]]);
-				} else {
-					overrideVideo.pause();
-					overrideVideo.style.opacity = '0';
-					delete overrideVideo.dataset.currentFile;
-					delete overrideVideo.dataset.forceSync;
-				}
+                if (overrideKeys.length > 0) {
+                    syncMediaNode(overrideVideo, data.overrides[overrideKeys[0]]);
+                } else {
+                    overrideVideo.pause();
+                    overrideVideo.style.opacity = '0';
+                    delete overrideVideo.dataset.currentFile;
+                    delete overrideVideo.dataset.forceSync;
+                }
 
                 const currentSubKeys = Object.keys(data.submedia || {});
                 
@@ -256,53 +255,80 @@ $has_ui = $show_play || $show_stop || $show_fullscreen;
             }
         }
 
-        function syncMediaNode(videoEl, mediaData) {
-            if (!mediaData || mediaData.state === "offline") {
-                videoEl.pause();
+		function syncMediaNode(videoEl, mediaData) {
+            // Guard against offline, empty, or missing file payload
+            if (!mediaData || mediaData.state === "offline" || !mediaData.file) {
+                if (!videoEl.paused) videoEl.pause();
                 videoEl.style.opacity = '0';
+                delete videoEl.dataset.currentFile;
                 return;
             }
 
             const isPaused = mediaData.state === "paused";
+            const currentFile = videoEl.dataset.currentFile;
 
-            if (!videoEl.dataset.currentFile || videoEl.dataset.currentFile !== mediaData.file) {
-                videoEl.style.opacity = '0'; 
+            // Check if file has changed
+            if (currentFile !== mediaData.file) {
+                // If actively playing, has valid duration, and hasn't ended yet
+                if (currentFile && videoEl.readyState >= 1 && videoEl.duration && !videoEl.paused && !videoEl.ended) {
+                    const timeRemaining = videoEl.duration - videoEl.currentTime;
+                    // Only hold off if in the final 5s AND server is at the beginning of the new track
+                    if (timeRemaining > 0 && timeRemaining <= 5 && (mediaData.position || 0) <= 5) {
+                        return; // Let the tail end finish naturally
+                    }
+                }
+
+                // Clean out any previous handlers to avoid duplicate triggers
+                videoEl.onloadedmetadata = null;
+                videoEl.onended = null;
+
+                videoEl.style.opacity = '0';
+                // Do not encode slashes in the filepath
                 videoEl.src = '/?video=' + mediaData.file;
                 videoEl.dataset.currentFile = mediaData.file;
-                videoEl.dataset.forceSync = "true"; 
-                
+                videoEl.dataset.forceSync = "true";
+
                 videoEl.onloadedmetadata = () => {
-                    videoEl.currentTime = mediaData.position; 
+                    const targetPos = Math.max(0, mediaData.position || 0);
+                    if (Number.isFinite(videoEl.duration) && targetPos < videoEl.duration) {
+                        videoEl.currentTime = targetPos;
+                    }
                     if (!isPaused) {
-                        videoEl.play().catch(e => console.error("Play error:", e));
+                        videoEl.play().catch(e => console.warn("Autoplay deferred:", e.message));
                     }
                 };
+
+                videoEl.onended = () => {
+                    videoEl.style.opacity = '0';
+                    delete videoEl.dataset.currentFile;
+                };
+
             } else {
+                // Same file is active
                 if (videoEl.ended) {
-                    videoEl.style.opacity = '0'; 
-                    return; 
+                    videoEl.style.opacity = '0';
+                    return;
                 }
 
-                if (videoEl.readyState > 0) {
-                    if (Math.abs(videoEl.currentTime - mediaData.position) > SYNC_THRESHOLD_SECONDS) {
-                        videoEl.currentTime = mediaData.position;
-                    }
-                    
-                    if (videoEl.dataset.forceSync === "true" && videoEl.readyState >= 2) {
+                // Only touch opacity and playback once media is actually loaded and ready
+                if (videoEl.readyState >= 2) {
+                    if (videoEl.dataset.forceSync === "true") {
                         videoEl.dataset.forceSync = "false";
                     }
-                    
-                    if (videoEl.dataset.forceSync === "false" && mediaData.visible !== false) {
+
+                    if (mediaData.visible !== false) {
                         videoEl.style.opacity = '1';
-                    } else if (mediaData.visible === false) {
+                    } else {
                         videoEl.style.opacity = '0';
                     }
-                }
-                
-                if (isPaused) {
-                    if (!videoEl.paused) videoEl.pause();
-                } else {
-                    if (videoEl.paused) videoEl.play().catch(e => console.error("Play error:", e));
+
+                    if (isPaused) {
+                        if (!videoEl.paused) videoEl.pause();
+                    } else {
+                        if (videoEl.paused) {
+                            videoEl.play().catch(e => console.warn("Play deferred:", e.message));
+                        }
+                    }
                 }
             }
 

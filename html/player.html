@@ -16,6 +16,7 @@
             align-items: center;
             font-family: 'Courier New', Courier, monospace;
             overflow: hidden;
+            user-select: none;
         }
 
         .tv-scale-box {
@@ -99,21 +100,51 @@
         #player-frame {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             border: none; z-index: 1;
+            transform-origin: center center;
         }
 
+        /* Enhanced CRT Barrel Distortion, Vignetting & Scanlines */
         .crt-effects {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            background-size: 100% 4px, 3px 100%;
-            box-shadow: inset 0 0 6cqw rgba(0,0,0,0.9);
-            opacity: 0; transition: opacity 0.2s ease;
+            background: 
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%),
+                linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.04));
+            background-size: 100% 4px, 4px 100%;
+            box-shadow: inset 0 0 5cqw rgba(0,0,0,0.9), inset 0 0 1.5cqw rgba(0,0,0,0.95);
+            opacity: 0; 
+            transition: opacity 0.2s ease;
         }
         .crt-effects::after {
             content: " "; display: block; position: absolute; top: 0; left: 0; bottom: 0; right: 0;
             background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 60%); z-index: 11;
         }
+        
         @keyframes flicker { 0% { opacity: 0.98; } 50% { opacity: 1; } 100% { opacity: 0.99; } }
         .screen.is-on .crt-effects { opacity: 1; animation: flicker 0.15s infinite; }
+
+        /* CRT Phosphor Beam Collapse */
+        @keyframes crt-power-off {
+            0% {
+                transform: scale(1, 1);
+                filter: brightness(1);
+            }
+            40% {
+                transform: scale(1, 0.005);
+                filter: brightness(2.5);
+            }
+            80% {
+                transform: scale(0.005, 0.005);
+                filter: brightness(4);
+            }
+            100% {
+                transform: scale(0, 0);
+                filter: brightness(0);
+            }
+        }
+
+        .screen.powering-down #player-frame {
+            animation: crt-power-off 0.35s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
+        }
 
         .control-panel {
             width: 18cqw; 
@@ -137,7 +168,8 @@
             background: radial-gradient(circle at 30% 30%, #555, #111);
             border: 0.4cqw solid #000;
             box-shadow: 0.3cqw 0.4cqw 0.6cqw rgba(0,0,0,0.6);
-            position: relative; cursor: pointer; transform: rotate(-30deg);
+            position: relative; cursor: pointer;
+            transition: transform 0.1s cubic-bezier(0.2, 1.3, 0.4, 1);
         }
         .knob::after {
             content: ''; position: absolute; top: 0.8cqw; left: 50%; transform: translateX(-50%);
@@ -150,7 +182,6 @@
             border-radius: 0.6cqw; border: 0.15cqw solid #000; box-shadow: inset 0 0.8cqw 1.5cqw rgba(0,0,0,0.8);
         }
 
-        /* --- New Power Knob --- */
         .power-knob {
             width: 3cqw; height: 3cqw; border-radius: 50%;
             background: radial-gradient(circle at 30% 30%, #444, #111);
@@ -164,25 +195,12 @@
             width: 0.4cqw; height: 1.0cqw; background: #999; border-radius: 0.2cqw;
             transition: background 0.2s ease, box-shadow 0.2s ease;
         }
-        /* Rotates 90 degrees and glows red when activated */
         .power-knob.is-on {
             transform: rotate(90deg);
         }
         .power-knob.is-on::after {
             background: #ff5252;
             box-shadow: 0 0 0.5cqw #ff5252;
-        }
-
-        .buttons { display: flex; flex-direction: column; gap: 2cqw; width: 100%; margin-bottom: 0.5cqw; }
-        .chunky-btn {
-            background: #1a1a1a; color: #9e9e9e; 
-            border: 0.3cqw solid #000; border-top-color: #444; border-left-color: #444;
-            padding: 1.5cqw; font-family: inherit; font-weight: bold; font-size: 1.8cqw; cursor: pointer;
-            border-radius: 0.6cqw; transition: all 0.1s;
-        }
-        .chunky-btn:active {
-            border-top-color: #000; border-left-color: #000; border-bottom-color: #444; border-right-color: #444;
-            transform: translateY(2px);
         }
     </style>
 </head>
@@ -206,21 +224,20 @@
             <div class="control-panel">
                 <div class="dial-container">
                     <div class="dial-label">VHF</div>
-                    <div class="knob"></div>
+                    <div class="knob" id="knob-vhf" style="transform: rotate(-30deg);"></div>
                 </div>
                 <div class="dial-container">
                     <div class="dial-label">UHF</div>
-                    <div class="knob" style="transform: rotate(60deg);"></div>
+                    <div class="knob" id="knob-uhf" style="transform: rotate(60deg);"></div>
                 </div>
                 
                 <div class="speaker-grill"></div>
                 
-				<div class="dial-container">
+                <div class="dial-container">
                     <div class="dial-label">Full</div>
                     <div class="power-knob" id="fullscreen-btn"></div>
                 </div>
 
-                <!-- Replaced Power Button with smaller knob -->
                 <div class="dial-container">
                     <div class="dial-label">POWER</div>
                     <div class="power-knob" id="power-btn"></div>
@@ -233,23 +250,62 @@
         const screen = document.getElementById('screen');
         const powerBtn = document.getElementById('power-btn');
         const playerFrame = document.getElementById('player-frame');
+        const vhfKnob = document.getElementById('knob-vhf');
+        const uhfKnob = document.getElementById('knob-uhf');
         
         let isActive = false;
+        let vhfChannel = 0;
+        let uhfChannel = 3;
 
-        powerBtn.addEventListener('click', () => {
-            isActive = !isActive;
-            
-            if (isActive) {
+        function setPower(on) {
+            if (on) {
+                screen.classList.remove('powering-down');
                 powerBtn.classList.add('is-on');
                 screen.classList.add('is-on');
+                isActive = true;
+                playerFrame.contentWindow.postMessage({ 
+                    command: 'power', 
+                    state: true 
+                }, '*');
             } else {
                 powerBtn.classList.remove('is-on');
                 screen.classList.remove('is-on');
-            }
+                screen.classList.add('powering-down');
+                isActive = false;
 
+                // Allow beam collapse animation to complete before signaling iframe
+                setTimeout(() => {
+                    playerFrame.contentWindow.postMessage({ 
+                        command: 'power', 
+                        state: false 
+                    }, '*');
+                }, 350);
+            }
+        }
+
+        powerBtn.addEventListener('click', () => {
+            setPower(!isActive);
+        });
+
+        // 12-detent VHF dial (30-degree increments)
+        vhfKnob.addEventListener('click', () => {
+            vhfChannel = (vhfChannel + 1) % 12;
+            vhfKnob.style.transform = `rotate(${vhfChannel * 30 - 30}deg)`;
             playerFrame.contentWindow.postMessage({ 
-                command: 'power', 
-                state: isActive 
+                command: 'channel_step', 
+                band: 'vhf',
+                channel: vhfChannel 
+            }, '*');
+        });
+
+        // 16-detent UHF dial (22.5-degree increments)
+        uhfKnob.addEventListener('click', () => {
+            uhfChannel = (uhfChannel + 1) % 16;
+            uhfKnob.style.transform = `rotate(${uhfChannel * 22.5}deg)`;
+            playerFrame.contentWindow.postMessage({ 
+                command: 'channel_step', 
+                band: 'uhf',
+                channel: uhfChannel 
             }, '*');
         });
 
@@ -267,9 +323,7 @@
             const data = event.data;
             if (data && data.status) {
                 if (data.status === 'stopped' && isActive) {
-                    isActive = false;
-                    powerBtn.classList.remove('is-on');
-                    screen.classList.remove('is-on');
+                    setPower(false);
                 }
             }
         });

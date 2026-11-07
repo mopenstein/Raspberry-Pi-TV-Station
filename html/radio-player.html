@@ -31,40 +31,6 @@
             justify-content: center;
         }
 
-        /* Top Carry Handle & Dual Antennas */
-        .top-assembly {
-            width: 82cqw;
-            height: 7cqw;
-            position: relative;
-            display: flex;
-            justify-content: center;
-            z-index: 0;
-            margin-bottom: -1cqw;
-        }
-
-        .handle {
-            width: 48cqw;
-            height: 6cqw;
-            border: 1.4cqw solid #1a1a1a;
-            border-bottom: none;
-            border-radius: 1.5cqw 1.5cqw 0 0;
-            background: linear-gradient(180deg, #555 0%, #222 100%);
-            box-shadow: inset 0 0.4cqw 0.8cqw rgba(255,255,255,0.25), 0 0.8cqw 1.5cqw rgba(0,0,0,0.8);
-            box-sizing: border-box;
-        }
-
-        .antenna {
-            position: absolute;
-            bottom: 0.5cqw;
-            width: 0.8cqw;
-            height: 10cqw;
-            background: linear-gradient(90deg, #999 0%, #eee 50%, #777 100%);
-            border-radius: 0.4cqw;
-        }
-        .antenna.left { left: 4cqw; transform-origin: bottom center; transform: rotate(-45deg); }
-        .antenna.right { right: 4cqw; transform-origin: bottom center; transform: rotate(45deg); }
-        .antenna-tip { position: absolute; top: -0.5cqw; left: -0.3cqw; width: 1.4cqw; height: 1.4cqw; background: #111; border-radius: 50%; }
-
         /* Main Brushed-Metal & Black Chassis */
         .chassis {
             width: 95cqw;
@@ -173,13 +139,14 @@
             box-shadow: 0 0 0.6cqw #ff3d00;
         }
 
+        /* Scaled down to ~75% size (from 4.8cqw to 3.6cqw) */
         .tuning-knob {
-            width: 4.8cqw;
-            height: 4.8cqw;
+            width: 3.6cqw;
+            height: 3.6cqw;
             border-radius: 50%;
             background: radial-gradient(circle at 30% 30%, #555, #111);
-            border: 0.35cqw solid #000;
-            box-shadow: 0.2cqw 0.4cqw 0.7cqw rgba(0,0,0,0.8);
+            border: 0.28cqw solid #000;
+            box-shadow: 0.2cqw 0.35cqw 0.6cqw rgba(0,0,0,0.8);
             position: relative;
             cursor: pointer;
             transition: transform 0.1s ease;
@@ -187,13 +154,13 @@
         .tuning-knob::after {
             content: '';
             position: absolute;
-            top: 0.6cqw;
+            top: 0.45cqw;
             left: 50%;
             transform: translateX(-50%);
-            width: 0.45cqw;
-            height: 1.4cqw;
+            width: 0.35cqw;
+            height: 1.05cqw;
             background: #ddd;
-            border-radius: 0.2cqw;
+            border-radius: 0.15cqw;
         }
 
         /* Main Acoustic Bay */
@@ -248,17 +215,6 @@
             box-shadow: 0 0.5cqw 1cqw rgba(0,0,0,0.9);
             will-change: transform;
             transition: transform 0.05s ease-out;
-        }
-
-        /* Fine Wire Mesh Overlay */
-        .speaker-mesh {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            border-radius: 50%;
-            background: repeating-linear-gradient(0deg, transparent 0, transparent 0.25cqw, rgba(0,0,0,0.35) 0.35cqw);
-            pointer-events: none;
-            z-index: 2;
         }
 
         /* Pumping Excursion Animations */
@@ -360,93 +316,234 @@
             overflow: hidden;
         }
 
-        /* Cassette Well */
-        .cassette-well {
+        /* Authentic Retro Cassette Deck Door & Well */
+        .cassette-deck-door {
             width: 100%;
-            height: 12cqw;
-            background: #181818;
-            border: 0.3cqw solid #222;
-            border-radius: 0.4cqw;
-            box-shadow: inset 0 0.4cqw 1cqw #000;
+            height: 16.5cqw;
+            background: linear-gradient(180deg, #1f1f1f 0%, #111111 100%);
+            border: 0.3cqw solid #333;
+            border-radius: 0.5cqw;
+            box-shadow: inset 0 0.4cqw 1cqw rgba(0,0,0,0.9), 0 0.4cqw 0.8cqw rgba(0,0,0,0.6);
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
-            padding: 0 1.5cqw;
+            padding: 0.8cqw;
             box-sizing: border-box;
-            gap: 3cqw;
+            overflow: hidden;
         }
-        .spindle-wheel {
+
+        /* Tinted Smoked Acrylic Window with Glare */
+        .cassette-door-window {
+            width: 96%;
+            height: 94%;
+            background: rgba(18, 18, 20, 0.88);
+            border: 0.18cqw solid #444;
+            border-radius: 0.35cqw;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 1.2cqw #000;
+            overflow: hidden;
+        }
+        .cassette-door-window::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 40%;
+            background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.02) 60%, transparent 100%);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        /* Detailed Vintage Cassette Body */
+        .cassette-shell {
+            width: 25cqw;
+            height: 13.8cqw;
+            background: #232323;
+            border-radius: 0.5cqw;
+            border: 0.15cqw solid #171717;
+            box-shadow: 0 0.4cqw 1cqw rgba(0,0,0,0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6cqw 0.8cqw;
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        /* Top Printed Tape Label */
+        .cassette-label {
+            width: 94%;
+            height: 4.8cqw;
+            background: linear-gradient(90deg, #d32f2f 0%, #e65100 45%, #ffb300 100%);
+            border-radius: 0.25cqw;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 0.8cqw;
+            box-sizing: border-box;
+            box-shadow: inset 0 0 0.3cqw rgba(0,0,0,0.4);
+        }
+        .tape-side {
+            background: #111;
+            color: #fff;
+            font-size: 1.2cqw;
+            font-weight: 900;
+            padding: 0.1cqw 0.4cqw;
+            border-radius: 0.15cqw;
+            line-height: 1;
+        }
+        .tape-title {
+            color: #111;
+            font-size: 0.75cqw;
+            font-weight: bold;
+            letter-spacing: 0.08cqw;
+        }
+
+        /* Center Spool Bay and Transparent Bridge */
+        .cassette-bridge {
+            width: 94%;
+            height: 5.6cqw;
+            background: #191919;
+            border-radius: 0.3cqw;
+            border: 0.15cqw solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            position: relative;
+            box-shadow: inset 0 0.2cqw 0.6cqw rgba(0,0,0,0.9);
+            padding: 0 1cqw;
+            box-sizing: border-box;
+        }
+
+        /* Spinning Spool Hubs with Cog Teeth */
+        .spool-hub {
             width: 4cqw;
             height: 4cqw;
             border-radius: 50%;
-            background: #111;
-            border: 0.3cqw solid #333;
-            box-shadow: inset 0 0 0.6cqw #000;
+            background: #f5f5f5;
             position: relative;
-        }
-        .spindle-wheel::before {
-            content: '';
-            position: absolute;
-            top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            width: 1.2cqw; height: 1.2cqw;
-            background: #eee;
-            border-radius: 50%;
-        }
-        .cassette-window {
-            width: 14cqw;
-            height: 6cqw;
-            border: 0.2cqw solid #444;
-            background: rgba(0,0,0,0.6);
-            border-radius: 0.3cqw;
+            box-shadow: 0 0.1cqw 0.4cqw rgba(0,0,0,0.8);
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #666;
-            font-size: 1.1cqw;
-            font-weight: bold;
-            letter-spacing: 0.15cqw;
+        }
+        .spool-center {
+            width: 1.6cqw;
+            height: 1.6cqw;
+            background: #151515;
+            border-radius: 50%;
+            border: 0.18cqw solid #f5f5f5;
+            position: relative;
+            z-index: 2;
+        }
+        .spool-spoke {
+            position: absolute;
+            width: 0.3cqw;
+            height: 100%;
+            background: #151515;
+        }
+        .spool-spoke:nth-child(2) { transform: rotate(60deg); }
+        .spool-spoke:nth-child(3) { transform: rotate(120deg); }
+
+        /* Rotating tape reels when playing */
+        @keyframes spin-reel {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .spinning .spool-hub {
+            animation: spin-reel 1.6s linear infinite;
         }
 
-        /* Mechanical Transport Keys */
+        /* Clear Tape Window in Center */
+        .tape-window {
+            width: 7cqw;
+            height: 2.8cqw;
+            background: rgba(45, 25, 12, 0.85);
+            border: 0.15cqw solid #444;
+            border-radius: 0.2cqw;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 0.4cqw #000;
+        }
+        .tape-ribbon {
+            width: 90%;
+            height: 1.2cqw;
+            background: #3a1f11;
+            border-radius: 0.1cqw;
+        }
+
+        /* Bottom Trapezoid Guide Area */
+        .cassette-bottom-trap {
+            width: 70%;
+            height: 1.6cqw;
+            background: #1a1a1a;
+            border-top: 0.1cqw solid #333;
+            border-radius: 0.2cqw 0.2cqw 0 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+        }
+        .tape-roller-pin {
+            width: 0.5cqw;
+            height: 0.5cqw;
+            background: #bbb;
+            border-radius: 50%;
+        }
+
+        /* 1980s Mechanical Piano Transport Keys Strip */
         .transport-keys {
             width: 100%;
             display: flex;
-            gap: 0.6cqw;
+            gap: 0.4cqw;
+            background: #141414;
+            padding: 0.4cqw;
+            box-sizing: border-box;
+            border: 0.25cqw solid #252525;
+            border-radius: 0.4cqw;
+            box-shadow: inset 0 0.2cqw 0.6cqw #000;
         }
         .key {
             flex: 1;
-            background: linear-gradient(180deg, #d8d8d8 0%, #8c8c8c 100%);
-            border: 0.2cqw solid #222;
-            border-top: 0.2cqw solid #fff;
-            border-radius: 0.3cqw;
-            padding: 0.7cqw 0;
-            font-size: 0.9cqw;
-            font-weight: bold;
-            color: #111;
+            background: linear-gradient(180deg, #e4e4e4 0%, #a6a6a6 55%, #7e7e7e 100%);
+            border: 0.15cqw solid #1e1e1e;
+            border-top: 0.18cqw solid #ffffff;
+            border-radius: 0.25cqw;
+            padding: 0.65cqw 0.1cqw;
+            font-size: 0.68cqw;
+            font-weight: 800;
+            color: #1a1a1a;
             text-align: center;
             cursor: pointer;
-            box-shadow: 0 0.5cqw 0.8cqw rgba(0,0,0,0.8);
-            transition: all 0.05s ease;
+            box-shadow: 0 0.4cqw 0.6cqw rgba(0,0,0,0.85);
+            transition: all 0.08s ease;
+            white-space: nowrap;
+            letter-spacing: -0.01cqw;
         }
         .key:active, .key.pressed {
-            transform: translateY(0.3cqw);
+            transform: translateY(0.25cqw);
             background: linear-gradient(180deg, #8c8c8c 0%, #666 100%);
             border-top-color: #555;
-            box-shadow: 0 0.2cqw 0.3cqw rgba(0,0,0,0.8);
+            box-shadow: 0 0.1cqw 0.25cqw rgba(0,0,0,0.8);
+            color: #111;
+        }
+        .key.rec-key {
+            color: #920000;
+        }
+        .key.rec-key::before {
+            content: '● ';
+            color: #d32f2f;
         }
     </style>
 </head>
 <body>
 
     <div class="boombox-scale-box">
-        
-        <div class="top-assembly">
-            <div class="antenna left"><div class="antenna-tip"></div></div>
-            <div class="handle"></div>
-            <div class="antenna right"><div class="antenna-tip"></div></div>
-        </div>
 
         <div class="chassis">
             
@@ -480,7 +577,6 @@
                     <div class="speaker-cone">
                         <div class="dust-cap"></div>
                     </div>
-                    <div class="speaker-mesh"></div>
                 </div>
 
                 <!-- Center Section -->
@@ -497,21 +593,53 @@
                         </div>
                     </div>
 
-                    <div class="cassette-well">
-                        <div class="spindle-wheel"></div>
-                        <div class="cassette-window">FM STEREO</div>
-                        <div class="spindle-wheel"></div>
+                    <!-- Retro Cassette Tape Deck Bay -->
+                    <div class="cassette-deck-door" id="cassette-deck">
+                        <div class="cassette-door-window">
+                            <div class="cassette-shell">
+                                <div class="cassette-label">
+                                    <span class="tape-side">A</span>
+                                    <span class="tape-title">HIGH BIAS / TYPE II</span>
+                                    <span class="tape-side">90</span>
+                                </div>
+                                <div class="cassette-bridge">
+                                    <div class="spool-hub" id="spool-left">
+                                        <div class="spool-spoke"></div>
+                                        <div class="spool-spoke"></div>
+                                        <div class="spool-spoke"></div>
+                                        <div class="spool-center"></div>
+                                    </div>
+                                    <div class="tape-window">
+                                        <div class="tape-ribbon"></div>
+                                    </div>
+                                    <div class="spool-hub" id="spool-right">
+                                        <div class="spool-spoke"></div>
+                                        <div class="spool-spoke"></div>
+                                        <div class="spool-spoke"></div>
+                                        <div class="spool-center"></div>
+                                    </div>
+                                </div>
+                                <div class="cassette-bottom-trap">
+                                    <div class="tape-roller-pin"></div>
+                                    <div class="tape-roller-pin"></div>
+                                    <div class="tape-roller-pin"></div>
+                                </div>
+                            </div>
+                        </div>
 
                         <div class="hidden-bay">
                             <iframe id="player-frame" src="web-player.php"></iframe>
                         </div>
                     </div>
 
+                    <!-- Authentic Piano Keys Transport Bar -->
                     <div class="transport-keys">
-                        <div class="key" id="btn-play">PLAY</div>
-                        <div class="key" id="btn-stop">STOP</div>
-                        <div class="key" id="btn-prev">&lt;&lt; CH</div>
-                        <div class="key" id="btn-next">CH &gt;&gt;</div>
+                        <div class="key rec-key" id="btn-rec">REC</div>
+                        <div class="key" id="btn-rew">&lt;&lt; REW</div>
+                        <div class="key" id="btn-ff">FF &gt;&gt;</div>
+                        <div class="key" id="btn-play">&#9654; PLAY</div>
+                        <div class="key" id="btn-stop">&#9632; STOP</div>
+                        <div class="key" id="btn-pause">&#10074;&#10074; PAUSE</div>
                     </div>
 
                 </div>
@@ -521,7 +649,6 @@
                     <div class="speaker-cone">
                         <div class="dust-cap"></div>
                     </div>
-                    <div class="speaker-mesh"></div>
                 </div>
             </div>
 
@@ -539,12 +666,16 @@
         const needleRight = document.getElementById('needle-right');
         const speakerLeft = document.getElementById('speaker-left');
         const speakerRight = document.getElementById('speaker-right');
+        const cassetteDeck = document.getElementById('cassette-deck');
         const btnPlay = document.getElementById('btn-play');
         const btnStop = document.getElementById('btn-stop');
-        const btnPrev = document.getElementById('btn-prev');
-        const btnNext = document.getElementById('btn-next');
+        const btnPause = document.getElementById('btn-pause');
+        const btnRec = document.getElementById('btn-rec');
+        const btnRew = document.getElementById('btn-rew');
+        const btnFf = document.getElementById('btn-ff');
 
         let isPowered = false;
+        let isPaused = false;
         let channelIndex = 0;
         let animationInterval = null;
 
@@ -561,16 +692,25 @@
         function updatePower(state) {
             isPowered = state;
             if (isPowered) {
+                isPaused = false;
+                btnPause.classList.remove('pressed');
                 powerToggle.classList.add('is-on');
                 vuLeft.classList.add('lit');
                 vuRight.classList.add('lit');
                 btnPlay.classList.add('pressed');
+                btnStop.classList.remove('pressed');
+                cassetteDeck.classList.add('spinning');
                 startAudioSimulation();
             } else {
+                isPaused = false;
+                btnPause.classList.remove('pressed');
                 powerToggle.classList.remove('is-on');
                 vuLeft.classList.remove('lit');
                 vuRight.classList.remove('lit');
                 btnPlay.classList.remove('pressed');
+                btnStop.classList.add('pressed');
+                setTimeout(() => btnStop.classList.remove('pressed'), 250);
+                cassetteDeck.classList.remove('spinning');
                 stopAudioSimulation();
             }
 
@@ -578,6 +718,27 @@
                 command: 'power', 
                 state: isPowered 
             }, '*');
+        }
+
+        function togglePause() {
+            if (!isPowered) return;
+            isPaused = !isPaused;
+            if (isPaused) {
+                btnPause.classList.add('pressed');
+                cassetteDeck.classList.remove('spinning');
+                stopAudioSimulation();
+                playerFrame.contentWindow.postMessage({ command: 'power', state: false }, '*');
+            } else {
+                btnPause.classList.remove('pressed');
+                cassetteDeck.classList.add('spinning');
+                startAudioSimulation();
+                playerFrame.contentWindow.postMessage({ command: 'power', state: true }, '*');
+            }
+        }
+
+        function flashKey(button) {
+            button.classList.add('pressed');
+            setTimeout(() => button.classList.remove('pressed'), 180);
         }
 
         function startAudioSimulation() {
@@ -588,7 +749,7 @@
             let tickCounter = 0;
 
             animationInterval = setInterval(() => {
-                if (!isPowered) return;
+                if (!isPowered || isPaused) return;
                 tickCounter++;
 
                 const hitPeak = Math.random() > 0.82;
@@ -634,9 +795,13 @@
         powerToggle.addEventListener('click', () => updatePower(!isPowered));
         btnPlay.addEventListener('click', () => updatePower(true));
         btnStop.addEventListener('click', () => updatePower(false));
+        btnPause.addEventListener('click', togglePause);
 
-        btnNext.addEventListener('click', () => stepChannel(1));
-        btnPrev.addEventListener('click', () => stepChannel(-1));
+        // Tactile dummy buttons
+        btnRec.addEventListener('click', () => flashKey(btnRec));
+        btnRew.addEventListener('click', () => flashKey(btnRew));
+        btnFf.addEventListener('click', () => flashKey(btnFf));
+
         tuneDial.addEventListener('click', () => stepChannel(1));
 
         window.addEventListener('message', (event) => {
