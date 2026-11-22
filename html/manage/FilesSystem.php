@@ -1,7 +1,7 @@
 <?php
 
 class FilesSystem implements ManageCard {
-    private $name = 'Files and System';
+	private $name = 'Files and System';
 	private $links = [];
 	private $html = null;
 
@@ -30,16 +30,17 @@ class FilesSystem implements ManageCard {
 	}
 
 	private function loadHtml() {
-        // Load HTML content from a file or database
-        $this->html = '<ul style="list-style: none;">
-        <form method="POST" action="" style="display:inline;">
-            <input type="hidden" name="action" value="reboot">
-            <center>
-				<button style="margin-top:12px; padding: 0.75rem 1rem; background: #ff000038; color: #f00; border-radius: 8px;" onclick="if(confirm(\'Reboot the Pi now?\')) this.closest(\'form\').submit(); return false;">{ ! } Reboot System { ! }</button>
+		// Load HTML content from a file or database
+		$this->html = '<ul style="list-style: none;">
+		<form method="POST" action="" style="display:inline;">
+			<input type="hidden" name="action" value="reboot">
+			<center>
+				<button style="margin-top:12px; padding: 10px; background: #ff000038; color: #f00; border-radius: 8px;" onclick="if(confirm(\'Reboot the Pi now?\')) this.closest(\'form\').submit(); return false;">{ ! } Reboot System { ! }</button>
 			</center>
-        </form>
+		</form>
+		<br />
 		</ul>';
-    }
+	}
 
 	public function __construct() {
 		// You can initialize any properties or perform setup tasks here
@@ -49,19 +50,19 @@ class FilesSystem implements ManageCard {
 	}
 
 	public function priority() {
-        return 100;
-    }
+		return 100;
+	}
 	
 	public function name() {
-        return $this->name;
-    }
+		return $this->name;
+	}
 
 	public function links() {
-        return $this->links;
-    }
+		return $this->links;
+	}
 
-    public function html() {
-        return $this->html;
-    }
+	public function html() {
+		return $this->html;
+	}
 }
 ?>

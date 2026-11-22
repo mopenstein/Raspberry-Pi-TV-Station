@@ -1,0 +1,22 @@
+[
+    {
+        "path": "/home/pi/Desktop/settings.json",
+        "archive_target": "settings.json"
+    },
+    {
+        "path": "$/plugins directory",
+        "archive_target": "plugins"
+    },
+    {
+        "path": "/var/www/html/schedule.json",
+        "archive_target": "schedule.json"
+    },
+    {
+        "path": "/var/www/html/docs",
+        "archive_target": "docs"
+    },
+    {
+        "path": "/var/www/html/templates",
+        "archive_target": "templates"
+    }
+]
