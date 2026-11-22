@@ -1,10 +1,12 @@
 #!/usr/bin/python
-# version: 102.32
+# version: 102.33
 # version date: 2026.11
 #
 #	Moving from single large releases to constant updates.
 #	Cleaning up the codebase and removing legacy/unused code.
 #	Update auto commercial insert logic to allow for a real-world media transition overhead.
+#		Linear playlist now generated allowing for more accurate playback (and possible future resume/join-in-progress support).
+#	Fixed bug in get_video_tag function where it would return only a single word in a multi-word tag. Also fixed it to only search the basename of the file so that '@' in parent directory names doesn't cause false positives.
 #
 # settings version: 0.997
 #
@@ -57,12 +59,15 @@ if sys.version_info[0] >= 3:
 
 # Constants
 
-SCRIPT_VERSION		= 102.32 # current version of the script
+SCRIPT_VERSION		= 102.33 # current version of the script
 SETTINGS_VERSION	= 0.997 # the version of the "settings" this script supports
 
 GET_VIDEOS_FROM_DIR_MIN_DURATION = 0 	 	# default minimum duration of a video in seconds when returning videos from a directory
 GET_VIDEOS_FROM_DIR_MAX_DURATION = 99999 	# default maximum duration of a video in seconds when returning videos from a directory
 VIDEO_EXTENSIONS = ('mp4', 'avi', 'webm', 'mpeg', 'm4v', 'mkv', 'mov', 'flv', 'wmv')	# video file extensions that are considered valid video files
+
+# List of recognized holiday names for special programming or scheduling
+HOLIDAY_NAMES = [ "thanksgiving", "xmas", "halloween", "mothers day", "fathers day", "memorial day", "easter", "new years day", "mlk day", "valentines day", "presidents day", "st patricks day", "april fools day", "independence day", "4th of july", "labor day", "columbus day", "veterans day", "christmas eve", "new years eve" ]
 
 # /Constants
 
@@ -89,7 +94,12 @@ ALLOWED_AST_NODES = (
 # Global Variables
 
 LAST_PROGRAMMING_SCHEDULE = None # global variable to hold the last programming schedule
-last_telemetry = None # global variable to hold the last telemetry data
+LAST_TELEMETRY = None # global variable to hold the last telemetry data
+
+REPEATEDLY_TRACKED_PLAYS = {} # dictionary to track last played time and minimum cooldown for the "repeatedly" feature
+CACHED_GET_VIDEOS_FROM_DIR = {} # dictionary to cache results of get_videos_from_dir function to avoid repeated filesystem access
+
+LAST_REPORT_ERROR = [0, 0, 0, 0] # [last error time, last error report time, error count, reserved]
 
 # / Global Variables
 
@@ -284,6 +294,91 @@ def wait_for_plugins(plugin_dir, timeout=30):
 	print("Plugin loading timed out after", timeout, "seconds.")
 	return False
 
+def is_active_timeline_valid(timeline_path="active_timeline.json"):
+	"""
+	Checks if active_timeline.json exists and if the broadcast block
+	is still active based on the current global 'now' or system time.
+
+	:param timeline_path: Path to the cached timeline JSON file.
+	:return: True if the file exists and has NOT expired; False otherwise.
+	"""
+	global now
+
+	if not os.path.exists(timeline_path):
+		return False
+
+	try:
+		with open(timeline_path, 'r') as f:
+			data = json.load(f)
+
+		end_epoch = data.get('telemetry', {}).get('end_time_epoch')
+		if end_epoch is None:
+			return False
+
+		# Use global 'now' if available, otherwise fallback to system time
+		if 'now' in globals() and now is not None:
+			current_epoch = time.mktime(now.timetuple())
+		else:
+			current_epoch = time.time()
+
+		return current_epoch < end_epoch
+
+	except (IOError, ValueError, KeyError):
+		return False
+
+def cache_delete(filename):
+	"""
+	Deletes a file from the configured cache path.
+
+	:param filename: Base filename or relative path within cache_path.
+	:return: True if the file was deleted or did not exist, False on error.
+	"""
+	try:
+		cache_dir = get_setting(["cache_path"], "")
+		full_path = os.path.join(cache_dir, filename) if cache_dir else filename
+
+		if os.path.exists(full_path):
+			os.remove(full_path)
+			printd("Deleted cache file: " + ensure_string(full_path))
+		return True
+	except Exception as e:
+		report_error("CACHE_DELETE", ["Error deleting file", ensure_string(e), "PATH", ensure_string(full_path)])
+		return False
+
+def cache_file(out_str, filename):
+	"""
+	Writes a raw string to the designated cache directory, ensures
+	directory existence, and enforces pi permissions.
+
+	:param out_str: String data to write to disk.
+	:param filename: Destination filename (e.g., 'active_time.json').
+	:return: True on success, False on failure.
+	"""
+	if not out_str or not filename:
+		return False
+
+	default_cache = os.path.join(os.path.dirname(os.path.realpath(__file__)), "cache")
+	cache_dir = get_setting(['cache_path'], default_cache)
+
+	if not os.path.exists(cache_dir):
+		try:
+			os.makedirs(cache_dir)
+		except OSError:
+			pass
+
+	set_pi_permissions(cache_dir)
+
+	target_path = os.path.join(cache_dir, filename)
+
+	try:
+		with open(target_path, 'w') as f:
+			f.write(out_str)
+		set_pi_permissions(target_path)
+		return True
+	except Exception as e:
+		report_error("CACHE_FILE", ["Failed to write cache file", target_path, str(e)])
+		return False
+
 def printd(*args):
 	"""
 	Debug print function that only outputs messages if debug mode is enabled in the settings.
@@ -330,7 +425,284 @@ def report_video_playback(source, vtype="video", data=None):
 		printd("report_video_playback", contents, source)
 		return
 	printd(["report_video_playback: no param to report", source, vtype])
-	
+
+def play_video_timeline(timeline_file, vtype="video"):
+	"""
+	Plays an assembled broadcast timeline using OMXPlayer, supporting
+	resume/join-in-progress directly from a cached timeline JSON file.
+
+	:param timeline_file: File path to the active timeline JSON.
+	:param vtype: Media type descriptor (default "video").
+	:return: 1 on normal completion, 0 on crash, 2 on file error.
+	"""
+	global now
+	global last_played_video_source
+	global LAST_TELEMETRY
+
+	if not os.path.exists(timeline_file):
+		report_error("PLAY_TIMELINE", ["Error", "Timeline file not found", "PATH", str(timeline_file)])
+		return 2
+
+	try:
+		with open(timeline_file, 'r') as f:
+			data = json.load(f)
+	except Exception as e:
+		report_error("PLAY_TIMELINE", ["Error loading json", ensure_string(e), "PATH", str(timeline_file)])
+		return 2
+
+	items = data.get("items", [])
+	telemetry = data.get("telemetry", {})
+	if not items:
+		report_error("PLAY_TIMELINE", ["Error", "Timeline contains no items"])
+		return 2
+
+	# Update global telemetry with cached state
+	LAST_TELEMETRY = telemetry
+
+	# Restore current precise second into scheduling clock
+	update_current_time()
+	actual_now = now.replace(second=datetime.datetime.now().second)
+	actual_now_epoch = time.mktime(actual_now.timetuple()) + (actual_now.microsecond / 1000000.0)
+
+	start_epoch = telemetry.get("start_time_epoch", actual_now_epoch)
+	elapsed_seconds = actual_now_epoch - start_epoch
+
+	printd("TIMELINE RESUME: actual_now_epoch:", actual_now_epoch, "start_epoch:", start_epoch)
+	printd("TIMELINE RESUME: Elapsed seconds into block:", round(elapsed_seconds, 2))
+
+	if elapsed_seconds < 0:
+		elapsed_seconds = 0.0
+
+	# 1. Identify starting item and seek position
+	start_index = 0
+	initial_seek = 0.0
+
+	for idx, itm in enumerate(items):
+		b_start = itm.get("block_start_sec", 0.0)
+		b_end = itm.get("block_end_sec", 0.0)
+
+		if elapsed_seconds < b_end:
+			start_index = idx
+			if itm.get("type") == "show":
+				# For the show, offset elapsed time past segment start into base seek_offset
+				segment_offset = elapsed_seconds - b_start
+				initial_seek = itm.get("seek_offset", 0.0) + max(0.0, segment_offset)
+			elif itm.get("file") is not None:
+				# Commercial or bumper playing in progress
+				initial_seek = max(0.0, elapsed_seconds - b_start)
+			else:
+				initial_seek = 0.0
+			break
+	else:
+		# Timeline has already concluded
+		printd("TIMELINE RESUME: Block duration exceeded total planned window. Exiting.")
+		return 1
+
+	printd("TIMELINE RESUME: Resuming at item #", start_index, "of", len(items))
+	printd("TIMELINE RESUME: Item type:", items[start_index].get("type"), "| File:", items[start_index].get("file"))
+	printd("TIMELINE RESUME: Calculated initial seek position:", round(initial_seek, 3), "seconds")
+
+	player = None
+	comm_player = None
+	err_pos = 0.0
+
+	try:
+		# 2. Main show instance (Layer 1)
+		show_source = telemetry.get("source")
+		if not show_source:
+			# Fallback to first show block found in items
+			for itm in items:
+				if itm.get("type") == "show":
+					show_source = itm.get("file")
+					break
+
+		print('Main media file:' + ensure_string(show_source))
+		print("")
+
+		player_args = get_setting(["player_settings"], []) + ["--layer", "1"]
+		player = OMXPlayer(show_source, args=player_args, dbus_name="omxplayer.player" + str(random.randint(0, 999)))
+		sleep(0.5)
+
+		# Pre-position main player
+		current_item = items[start_index]
+		if current_item.get("type") == "show":
+			printd("TIMELINE OMX: Main show starting active. Seeking to:", round(initial_seek, 3), "seconds")
+			player.seek(initial_seek)
+			api_update_main(state="playing", media_type=vtype, file_path=show_source, position=initial_seek, visible=True)
+		else:
+			# Start muted and hidden while commercial/pause is active
+			player.mute()
+			player.hide_video()
+			player.pause()
+			
+			# Cue main player to the next upcoming show seek offset
+			queued_seek = 0.0
+			for nxt in items[start_index:]:
+				if nxt.get("type") == "show":
+					queued_seek = nxt.get("seek_offset", 0.0)
+					player.seek(queued_seek)
+					break
+			printd("TIMELINE OMX: Main show backgrounded. Pre-cued to next segment at:", round(queued_seek, 3), "seconds")
+			api_update_main(state="paused", media_type=vtype, file_path=show_source, position=0, visible=False)
+
+		# 3. Step sequentially through remaining timeline items
+		for i in range(start_index, len(items)):
+			item = items[i]
+			itype = item.get("type")
+			ifile = item.get("file")
+			seek_pos = initial_seek if i == start_index else item.get("seek_offset", 0.0)
+
+			printd("TIMELINE EXEC [", i, "/", len(items) - 1, "]: type:", itype, "seek_pos:", round(seek_pos, 3), "seconds")
+
+			# A. Script pause blocks
+			if itype == "break_pause":
+				api_update_main(state="paused", media_type=vtype, file_path=show_source, position=player.position() if player else 0, visible=False)
+				rem_pause = item.get("media_length", 0.5)
+				if i == start_index and elapsed_seconds > item.get("block_start_sec", 0.0):
+					rem_pause = max(0.0, item.get("block_end_sec", 0.0) - elapsed_seconds)
+				printd("TIMELINE PAUSE: Sleeping for:", round(rem_pause, 3), "seconds")
+				sleep(rem_pause)
+				continue
+
+			# B. Main show segments
+			if itype == "show":
+				last_played_video_source = ifile
+				if i != start_index:
+					printd("TIMELINE SHOW: Seeking main player to:", round(seek_pos, 3), "seconds")
+					player.seek(seek_pos)
+					sleep(0.2)
+
+				player.unmute()
+				player.show_video()
+				player.play()
+				api_clear_override("commercial_break")
+
+				target_end = item.get("seek_offset", 0.0) + item.get("media_length", 0.0)
+				printd("TIMELINE SHOW: Playing segment until target playhead position:", round(target_end, 3), "seconds")
+
+				while True:
+					err_pos = 1.0
+					try:
+						current_position = player.position()
+						api_update_main(state="playing", media_type=vtype, file_path=ifile, position=current_position, visible=True)
+					except:
+						break
+
+					# Show segment reached its break cue or file boundary
+					if current_position >= target_end:
+						printd("TIMELINE SHOW: Reached break cue at:", round(current_position, 3), "seconds | Target was:", round(target_end, 3), "seconds")
+						try:
+							player.mute()
+							player.hide_video()
+							player.pause()
+							api_update_main(state="paused", media_type=vtype, file_path=ifile, position=current_position, visible=False)
+						except Exception:
+							printd("player hide/pause error")
+						break
+					sleep(0.1)
+
+			# C. Commercials and Bumpers (Layer 2)
+			else:
+				last_played_video_source = ifile
+				print('Playing ' + str(itype) + ':', ifile)
+				print("")
+				report_video_playback(ifile, "commercial")
+
+				if comm_player is None:
+					comm_args = ["--no-osd", "--layer", "2"]
+					comm_player = OMXPlayer(ifile, args=comm_args, dbus_name="omxplayer.comm_player1")
+					sleep(0.25)
+				else:
+					comm_player.load(ifile)
+
+				if seek_pos > 0.0:
+					printd("TIMELINE COMM: In-progress resume, seeking commercial to:", round(seek_pos, 3), "seconds")
+					comm_player.seek(seek_pos)
+
+				try:
+					comm_player.show_video()
+				except:
+					printd("comm_player show error")
+
+				comm_length = item.get("media_length", get_length_from_file(ifile) or 0.0)
+				overhead = item.get("overhead", 0.0)
+				played_so_far = seek_pos if (i == start_index and seek_pos > 0.0) else 0.0
+				comm_duration = max(0.0, (comm_length - played_so_far))
+
+				comm_start_time = time.time()
+				comm_end_time = comm_start_time + comm_duration + 1.0
+
+				printd("TIMELINE COMM: Duration remaining:", round(comm_duration, 2), "seconds | Overhead:", overhead, "seconds")
+
+				while True:
+					if time.time() > comm_end_time:
+						print("Commercial should be over by now, moving on...")
+						break
+
+					if get_setting(['debug'], False) == True and time.time() - comm_start_time > int(get_setting(["debug position"], 999999, int)):
+						report_debug("COMM_PLAY_LOOP", ["Commercial has been playing for more than " + get_setting(["debug position"], "-1") + " seconds, ending early"])
+						comm_player.stop()
+						break
+
+					try:
+						comm_position = math.floor(comm_player.position())
+						api_set_override(layer_id="commercial_break", media_type="video", file_path=ifile, position=comm_position, visible=True)
+					except:
+						break
+
+					try:
+						if player.is_playing() == True:
+							player.hide_video()
+							player.pause()
+					except:
+						printd("player hide/pause error")
+					sleep(0.1)
+
+				if overhead > 0:
+					printd("TIMELINE COMM: Applying hardware overhead delay:", overhead, "seconds")
+					sleep(overhead)
+
+		# 4. Wrap up naturally
+		err_pos = 7.0
+		player.hide_video()
+		api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False)
+		api_clear_override("commercial_break")
+		sleep(0.5)
+
+	except Exception as e:
+		if err_pos != 7.0:
+			report_error("PLAY_LOOP", ["Error", ensure_string(e), "SOURCE", ensure_string(show_source), traceback.format_exc()])
+
+		api_update_main(state="offline", media_type="video", file_path="", position=0, visible=False)
+		api_clear_override("commercial_break")
+
+		kill_omxplayer()
+		try:
+			if comm_player is not None:
+				comm_player.quit()
+		except Exception as ex:
+			printd("error comm quit", ensure_string(ex))
+		try:
+			if player is not None:
+				player.quit()
+		except Exception as exx:
+			printd("error player quit", ensure_string(exx))
+
+		if err_pos != 7.0:
+			return 0
+
+	try:
+		if comm_player is not None:
+			comm_player.quit()
+	except Exception as ex:
+		report_error("COMM_quit", ["Position", ensure_string(err_pos), "Error", ensure_string(ex)])
+	try:
+		if player is not None:
+			player.quit()
+	except Exception as exx:
+		report_error("PLAY_quit", ["Position", ensure_string(err_pos), "Error", ensure_string(exx)])
+
+	return 1
 
 def play_video(source, commercials, max_commercials_per_break, start_pos, bumpers=None, vtype="video"):
 	"""
@@ -351,7 +723,7 @@ def play_video(source, commercials, max_commercials_per_break, start_pos, bumper
 		return 2
 
 	global last_played_video_source 
-	global last_telemetry
+	global LAST_TELEMETRY
 	comm_source = None 
 	if source==None: 
 		return 2
@@ -383,7 +755,7 @@ def play_video(source, commercials, max_commercials_per_break, start_pos, bumper
 		print('Main media file:' + ensure_string(source))
 		print("")
 
-		report_video_playback(source, vtype, last_telemetry)	
+		report_video_playback(source, vtype, LAST_TELEMETRY)	
 		player_args = get_setting(["player_settings"], []) + ["--layer", "1"] 
 		player = OMXPlayer(source, args=player_args, dbus_name="omxplayer.player" + str(random.randint(0,999))) 
 		sleep(0.5) 
@@ -896,6 +1268,142 @@ def is_within_range(data):
 	# Final Result: All conditions must be met
 	return date_within_range and time_within_range and year_within_range
 
+def compile_broadcast_timeline(source, pregenerated_commercials_list, bumpers=None, 
+							   delay_modifier=0.75, start_time_dt=None):
+	"""
+	Assembles the main show, sidecar commercial cues, bumpers, commercials,
+	and hardware latency into a single, sequential, time-accurate playlist.
+
+	:param source: Full file path to the main video.
+	:param pregenerated_commercials_list: Flat list of commercial file paths from prepare_commercials_and_bumpers.
+	:param bumpers: Dict with 'in' and 'out' lists from prepare_commercials_and_bumpers.
+	:param delay_modifier: Hardware transition overhead per clip in seconds (default 0.75).
+	:param start_time_dt: Datetime object of the scheduled start time (defaults to global 'now').
+	:return: List of chronological event dicts with exact second offsets.
+	"""
+	global now
+
+	if start_time_dt is None:
+		start_time_dt = now
+
+	show_total_length = get_length_from_file(source) or 0.0
+	cues_raw = get_commercials(source)
+	cues = sorted([float(c) for c in cues_raw]) if cues_raw else []
+	break_count = len(cues)
+
+	# 1. Distribute pregenerated commercials across breaks using spread_division
+	comm_queue = list(pregenerated_commercials_list) if pregenerated_commercials_list else []
+	comm_pods = [[] for _ in range(break_count)]
+
+	if break_count > 0 and comm_queue:
+		distribution = spread_division(len(comm_queue), break_count)
+		for b_idx, count in enumerate(distribution):
+			for _ in range(count):
+				if comm_queue:
+					comm_pods[b_idx].append(comm_queue.pop(0))
+
+	bumpers_in = list(bumpers.get('in', [])) if (bumpers and 'in' in bumpers) else []
+	bumpers_out = list(bumpers.get('out', [])) if (bumpers and 'out' in bumpers) else []
+
+	timeline = []
+	current_offset = 0.0
+	last_cue = 0.0
+
+	# 2. Interleave show segments, pauses, bumpers, and commercial pods
+	for i in range(break_count):
+		cue = cues[i]
+		seg_len = cue - last_cue
+
+		# Main Show Segment leading up to the cue
+		if seg_len > 0:
+			timeline.append({
+				'type': 'show',
+				'file': source,
+				'media_length': seg_len,
+				'seek_offset': last_cue,
+				'overhead': 0.0,
+				'block_start_sec': current_offset,
+				'block_end_sec': current_offset + seg_len
+			})
+			current_offset += seg_len
+
+		last_cue = cue
+
+		# Script Break Entry Pause (sleep 0.5)
+		timeline.append({
+			'type': 'break_pause',
+			'file': None,
+			'media_length': 0.5,
+			'seek_offset': 0.0,
+			'overhead': 0.0,
+			'block_start_sec': current_offset,
+			'block_end_sec': current_offset + 0.5
+		})
+		current_offset += 0.5
+
+		# Bumper OUT (Exiting show into commercial break)
+		if bumpers_out and i < len(bumpers_out) and bumpers_out[i]:
+			b_file = bumpers_out[i]
+			b_len = get_length_from_file(b_file) or 0.0
+			tot_len = b_len + delay_modifier
+			timeline.append({
+				'type': 'bumper_out',
+				'file': b_file,
+				'media_length': b_len,
+				'seek_offset': 0.0,
+				'overhead': delay_modifier,
+				'block_start_sec': current_offset,
+				'block_end_sec': current_offset + tot_len
+			})
+			current_offset += tot_len
+
+		# Commercial Pod for this break
+		for c_file in comm_pods[i]:
+			c_len = get_length_from_file(c_file) or 0.0
+			tot_len = c_len + delay_modifier
+			timeline.append({
+				'type': 'commercial',
+				'file': c_file,
+				'media_length': c_len,
+				'seek_offset': 0.0,
+				'overhead': delay_modifier,
+				'block_start_sec': current_offset,
+				'block_end_sec': current_offset + tot_len
+			})
+			current_offset += tot_len
+
+		# Bumper IN (Returning to show from commercial break)
+		if bumpers_in and i < len(bumpers_in) and bumpers_in[i]:
+			b_file = bumpers_in[i]
+			b_len = get_length_from_file(b_file) or 0.0
+			tot_len = b_len + delay_modifier
+			timeline.append({
+				'type': 'bumper_in',
+				'file': b_file,
+				'media_length': b_len,
+				'seek_offset': 0.0,
+				'overhead': delay_modifier,
+				'block_start_sec': current_offset,
+				'block_end_sec': current_offset + tot_len
+			})
+			current_offset += tot_len
+
+	# Final Show Segment from the last break cue to the end of the file
+	final_seg_len = show_total_length - last_cue
+	if final_seg_len > 0:
+		timeline.append({
+			'type': 'show',
+			'file': source,
+			'media_length': final_seg_len,
+			'seek_offset': last_cue,
+			'overhead': 0.0,
+			'block_start_sec': current_offset,
+			'block_end_sec': current_offset + final_seg_len
+		})
+		current_offset += final_seg_len
+
+	return timeline
+
 def calculate_fill_time(video_length, current_time, offset=-15, max_ratio=0.35, feature_threshold=4500, max_fill_seconds=2700):
 	"""
 	Calculates commercial fill seconds required to align to the broadcast grid.
@@ -939,14 +1447,12 @@ def calculate_fill_time(video_length, current_time, offset=-15, max_ratio=0.35, 
 
 # Part of "repeatedly" feature set by minimum-before-repeat.
 # 	stores the last played time for files set to have minimum time between plays
-# repeatedly_tracked_plays structure:
+# REPEATEDLY_TRACKED_PLAYS structure:
 # {
 #	"file": source,
 #	"last_played": timestamp
 # }
 # Dictionary to track last played time and minimum cooldown
-
-repeatedly_tracked_plays = {}
 
 def repeatedly_generate_id_from_dict(data):
 	"""
@@ -970,7 +1476,7 @@ def repeatedly_register_playable(entry, override=False, offset=0):
 	:param offset: A time offset in seconds to adjust the last played time (default is 0).
 	:return: The generated ID for the item.
 	"""
-	global repeatedly_tracked_plays
+	global REPEATEDLY_TRACKED_PLAYS
 
 	repeatedly_export_schedules_if_debug()
 
@@ -990,8 +1496,8 @@ def repeatedly_register_playable(entry, override=False, offset=0):
 		return
 
 	id = repeatedly_generate_id_from_dict(entry)
-	if id not in repeatedly_tracked_plays or override:
-		repeatedly_tracked_plays[id] = {
+	if id not in REPEATEDLY_TRACKED_PLAYS or override:
+		REPEATEDLY_TRACKED_PLAYS[id] = {
 			"last_played": time.time() - offset,
 			"minimum": float(minimum)
 		}
@@ -1005,10 +1511,10 @@ def repeatedly_can_play(entry):
 	:param entry: A dictionary representing the item to check.
 	:return: True if the item can be played, False otherwise.
 	"""
-	global repeatedly_tracked_plays
+	global REPEATEDLY_TRACKED_PLAYS
 	current_time = time.time()
 	id = repeatedly_generate_id_from_dict(entry)
-	entry_data = repeatedly_tracked_plays.get(id)
+	entry_data = REPEATEDLY_TRACKED_PLAYS.get(id)
 	if not entry_data:
 		return True
 	return (current_time - entry_data["last_played"]) >= entry_data["minimum"]
@@ -1020,8 +1526,8 @@ def repeatedly_reset():
 
 	:return: None
 	"""
-	global repeatedly_tracked_plays
-	repeatedly_tracked_plays = {}
+	global REPEATEDLY_TRACKED_PLAYS
+	REPEATEDLY_TRACKED_PLAYS = {}
 
 def repeatedly_export_schedules_if_debug():
 	"""
@@ -1032,13 +1538,13 @@ def repeatedly_export_schedules_if_debug():
 	:return: None
 	"""
 	if get_setting(['debug'], False) is True:
-		global repeatedly_tracked_plays, base_directory
+		global REPEATEDLY_TRACKED_PLAYS, base_directory
 		try:
 			filename=base_directory + "repeatedly_debug_export.txt"
 			with open(filename, "w", encoding="utf-8") as f:
 				# Pretty-print with timestamps converted to human-readable
 				export_data = {}
-				for id, data in repeatedly_tracked_plays.items():
+				for id, data in REPEATEDLY_TRACKED_PLAYS.items():
 					export_data[id] = {
 						"last_played": time.strftime(
 							"%Y-%m-%d %H:%M:%S", time.localtime(data["last_played"])
@@ -1186,10 +1692,12 @@ def get_video_tag(video_file):
 	:param video_file: The video file path.
 	:return: The video tag or None if not found.
 	"""
-	# The tag is expected to be in the format @tag@ in the file name
-	matches = re.findall(r'@([^@]+)@', video_file)
+	# Extract from basename only so '@' in parent directory names isn't matched
+	filename = os.path.basename(video_file)
+	matches = re.findall(r'@([^@]+)@', filename)
 	if matches:
-		return matches[-1].split()[-1]
+		tag = matches[-1].strip()
+		return tag if tag else None
 	return None
 
 def generate_commercials_list(total_time_seconds, multiplier=50, max_remaining_time=10, prefilled_list=None):
@@ -1211,6 +1719,7 @@ def generate_commercials_list(total_time_seconds, multiplier=50, max_remaining_t
 		# Check timeout
 		if time.time() - gen_start_time > max_time_before_timeout:
 			printd("taking too long to generate commercials, stopping", remaining_time)
+			report_error("GEN_COMM_LIST", ["taking too long to generate commercials, stopping", str(remaining_time), "consider increasing multiplier in settings.json"])
 			break
 
 		# Check tolerance floor
@@ -1222,10 +1731,6 @@ def generate_commercials_list(total_time_seconds, multiplier=50, max_remaining_t
 		if c is None:
 			printd("No commercial found under remaining time:", remaining_time)
 			break
-
-		if c in selected_intervals:
-			printd("Duplicate commercial found, skipping:", c)
-			continue
 
 		cTime = get_length_from_file(c)
 		if cTime == None or cTime <= 0:
@@ -1263,8 +1768,12 @@ def get_commercials(source):
 	#load single file for all commercials
 	#usefull when commercial breaks aren't easily identifiable for a lot of episodes from a single show
 	#first 8 chrs need to exactly the same
-	if os.path.isfile(source[:8] + '.commercials.master') == True:
-		with open(source[:8] + '.commercials.master') as temp_file:
+	source_dir = os.path.dirname(source)
+	source_fname = os.path.basename(source)
+	source_check = os.path.join(source_dir, source_fname[:8] + '.commercials.master')
+
+	if os.path.isfile(source_check) == True:
+		with open(source_check) as temp_file:
 			return [float(line.rstrip()) for line in temp_file]
 	
 	#load individual file for video
@@ -1488,8 +1997,6 @@ def clean_up_cache_files(dir_name,dir):
 			if item.split()[0] == dir:
 				os.remove(os.path.join(dir_name, item))
 
-
-
 def is_cache_valid(cache_path, dir_path):
 	"""
 	Checks if the cache file is valid by comparing the cached filenames with the current filenames in the directory.
@@ -1622,8 +2129,6 @@ def get_files_from_dir(dir_path, extensions=VIDEO_EXTENSIONS, min_length=GET_VID
 
 	return filtered_results_full_paths
 
-_cached_get_videos_from_dir = {}
-
 def get_videos_from_dir_cached(dir_path, min_length=GET_VIDEOS_FROM_DIR_MIN_DURATION, max_length=GET_VIDEOS_FROM_DIR_MAX_DURATION, filter=VIDEO_EXTENSIONS):
 	"""
 	Retrieves video files from a directory while avoiding hitting the file system by storing the cache in a variable for immediate access in the near future.
@@ -1637,11 +2142,11 @@ def get_videos_from_dir_cached(dir_path, min_length=GET_VIDEOS_FROM_DIR_MIN_DURA
 	if not os.path.isdir(dir_path):
 		return []
 
-	global _cached_get_videos_from_dir
+	global CACHED_GET_VIDEOS_FROM_DIR
 	nowz = time.time()
 
 	cache_key = (dir_path, min_length, max_length)
-	cache_entry = _cached_get_videos_from_dir.get(cache_key)
+	cache_entry = CACHED_GET_VIDEOS_FROM_DIR.get(cache_key)
 
 	# Use cached data if it exists and is recent
 	if cache_entry and nowz - cache_entry['timestamp'] < 120:  # 2 min freshness window
@@ -1649,7 +2154,7 @@ def get_videos_from_dir_cached(dir_path, min_length=GET_VIDEOS_FROM_DIR_MIN_DURA
 
 	# Otherwise, refresh from disk
 	results = get_files_from_dir(dir_path, filter, min_length, max_length)
-	_cached_get_videos_from_dir[cache_key] = {
+	CACHED_GET_VIDEOS_FROM_DIR[cache_key] = {
 		'timestamp': nowz,
 		'results': results
 	}
@@ -1678,7 +2183,6 @@ def is_date_within_range(date1, date2, range_days):
 		return True
 	return False
 
-
 def is_dict(var):
 	"""
 	Checks if the variable is a dictionary.
@@ -1687,8 +2191,6 @@ def is_dict(var):
 	:return: True if the variable is a dictionary, False otherwise.
 	"""
 	return isinstance(var, dict)
-
-holidays = [ "thanksgiving", "xmas", "halloween", "mothers day", "fathers day", "memorial day", "easter", "new years day", "mlk day", "valentines day", "presidents day", "st patricks day", "april fools day", "independence day", "4th of july", "labor day", "columbus day", "veterans day", "christmas eve", "new years eve" ]
 
 def get_holiday_datetime(holiday, year=None):
 	"""
@@ -1859,9 +2361,10 @@ def is_special_time(check):
 	:param check: The string to check against the holiday names.
 	:return: True if the current date matches the holiday criteria, False otherwise.
 	"""
+	global HOLIDAY_NAMES, now
 	check_lower = check.lower().strip()
 
-	for holiday in holidays:
+	for holiday in HOLIDAY_NAMES:
 		# We check if the input starts with the holiday name
 		if check_lower.startswith(holiday):
 			
@@ -1912,7 +2415,6 @@ def open_url(url):
 	except:
 		return None
 
-
 def replace_all_special_words(s, skip_drive_replacement=False):
 	"""
 	Replaces special keywords in a string with their actual values.
@@ -1936,7 +2438,6 @@ def replace_all_special_words(s, skip_drive_replacement=False):
 		s = s.replace(*r)
 	return s
 
-last_report_error = [0, 0, 0, 0] # [last error time, last error report time, error count, reserved]
 def report_debug(type, input, local_only=False):
 	"""	
 	Reports debug information to the local server and prints it to the console.
@@ -1962,13 +2463,13 @@ def report_error(type, input, local_only=False):
 	try:
 		global settings, channel_name_static, error_channel_set, start_time
 		global last_played_video_source
-		global last_report_error
+		global LAST_REPORT_ERROR
 
 		message = ""
 
 	 # Check for error loop
-		if (time.time() - last_report_error[0]) < 10:
-			if last_report_error[2] >= 10:
+		if (time.time() - LAST_REPORT_ERROR[0]) < 10:
+			if LAST_REPORT_ERROR[2] >= 10:
 					contents = open_url("http://127.0.0.1/?error=" + urllib.quote_plus(
 						ensure_string("ERROR LOOP|STUCK IN ERROR LOOP|EXITING PROGRAM")
 					))
@@ -1978,8 +2479,8 @@ def report_error(type, input, local_only=False):
 
 		else:
 			# Not stuck in loop, reset timer and count
-			last_report_error[0] = time.time()
-			last_report_error[2] = 0
+			LAST_REPORT_ERROR[0] = time.time()
+			LAST_REPORT_ERROR[2] = 0
 
 		# Build message
 		for s in input:
@@ -2009,7 +2510,7 @@ def report_error(type, input, local_only=False):
 				ensure_string(type) + "|" + ensure_string(message)
 			))
 
-		last_report_error = [last_report_error[0], time.time(), last_report_error[2] + 1, last_report_error[3]]
+		LAST_REPORT_ERROR = [LAST_REPORT_ERROR[0], time.time(), LAST_REPORT_ERROR[2] + 1, LAST_REPORT_ERROR[3]]
 
 	except Exception as e:
 		contents = open_url("http://127.0.0.1/?error=ERROR_REPORTING_ERROR|" + ensure_string(e) + "|" + traceback.format_exc())
@@ -2261,6 +2762,16 @@ if plugin_dir:
 else:
 	printd("No plugin directory set")
 
+def prune_expired_video_cache(max_age=120):
+	global CACHED_GET_VIDEOS_FROM_DIR
+	cutoff = time.time() - max_age
+	expired_keys = [
+		k for k, v in CACHED_GET_VIDEOS_FROM_DIR.items()
+		if v.get('timestamp', 0) < cutoff
+	]
+	for k in expired_keys:
+		del CACHED_GET_VIDEOS_FROM_DIR[k]
+
 # Playback control variables
 allow_chance = True
 source = None
@@ -2271,11 +2782,15 @@ def end_of_loop_tasks():
 	Final cleanup and maintenance tasks after each loop iteration.
 	Also handles uptime logging and optional daily reboot.
 	"""
-	global start_time, now, script_load_time
+	global start_time, now, script_load_time, current_video_tag
+
+	current_video_tag = None
 
 	update_current_time()
 	printd("-------------------------------------------------------------------------------")
 	start_time = time.time()
+
+	prune_expired_video_cache(240)  # Prune cache entries older than 4 minutes
 
 	uptime = get_uptime(script_load_time)
 	report_error("UPTIME", [str(uptime)])
@@ -2533,12 +3048,10 @@ def resolve_video_by_type(schedule, folders):
 				return None
 			else:
 				exit()
-		random_episode = meta.get("random video on first play", False)
-		if random_episode: # if this is the first time playing the show, play a random episode, otherwise play in order, overriding the global "random video on first play" setting if it is set in the metadata for this schedule block
-			full_url = "http://127.0.0.1/?get_next_episode=" + urllib.quote_plus(ensure_string(episodes[0]) + "&random=1")
-		if not random_episode: # this might be set to override the "random video on first play" global setting and force it to play the first video in the folder on the first play, then in order after that
-			full_url = "http://127.0.0.1/?get_next_episode=" + urllib.quote_plus(ensure_string(episodes[0]) + "&random=0")
-		else: # if the global setting is not overridden, or even set at all, let the server decide what to play
+		if "random video on first play" in meta:
+			rand_flag = "1" if meta["random video on first play"] else "0"
+			full_url = "http://127.0.0.1/?get_next_episode=" + urllib.quote_plus(ensure_string(episodes[0])) + "&random=" + rand_flag
+		else:
 			full_url = "http://127.0.0.1/?get_next_episode=" + urllib.quote_plus(ensure_string(episodes[0]))
 		
 		urlcontents = open_url(full_url)
@@ -2584,7 +3097,7 @@ def resolve_video_by_type(schedule, folders):
 					if handled:
 						if meta.get('minimum-before-repeat'):
 							repeatedly_register_playable(meta, True, get_length_from_file(plugin_file))
-							printd("Tracked Plays Updated:", repeatedly_tracked_plays)
+							printd("Tracked Plays Updated:", REPEATEDLY_TRACKED_PLAYS)
 						return { "handled_by_plugin": True,	"meta": meta, "file": plugin_file }
 
 		report_error("Programming Schedule", ["Unknown type", video_type])
@@ -2601,37 +3114,40 @@ def create_fresh_telemetry():
 	Returns a Python dict matching the broadcast telemetry schema.
 	"""
 	telemetry = {
-		"start_time": None,		 # Formatted string "HH:MM:SS" when playback initiates
-		"show_length": 0,		   # Declared tag runtime of the main media file in seconds
+		"start_time": None,			# Formatted string "HH:MM:SS" when playback initiates
+		"start_time_epoch": None,	# Epoch timestamp when playback initiates
+		"end_time": None,			# Formatted string "HH:MM:SS" when playback ends
+		"end_time_epoch": None,		# Epoch timestamp when playback ends
+		"show_length": 0,			# Declared tag runtime of the main media file in seconds
 		"target_boundary": None,	# Formatted string "HH:MM:SS" target (e.g., :00 or :30)
-		"calc_fill": 0,			 # Target fill seconds calculated by calculate_fill_time
-		"offset_used": 0,		   # Negative hardware delay offset applied (e.g., -15)
-		"break_count": 0,		   # Number of commercial pods scheduled in this show
-		"bumpers_in": [],		   # List of integer durations for 'in' bumpers (e.g., [5, 5])
-		"bumpers_out": [],		  # List of integer durations for 'out' bumpers (e.g., [5, 5])
-		"commercials": [],		  # List of integer durations for selected ads (e.g., [30, 15, 30])
-		"commercials_sum": 0,	   # Summed total of all tagged commercial durations in seconds
-		"script_pauses": 0,		  # Total seconds of script-induced pauses (e.g., for buffering)
-		"planned_total_window": 0   # Total calculated package duration (show + bumpers + ads)
+		"calc_fill": 0,				# Target fill seconds calculated by calculate_fill_time
+		"offset_used": 0,			# Negative hardware delay offset applied (e.g., -15)
+		"break_count": 0,			# Number of commercial pods scheduled in this show
+		"bumpers_in": [],			# List of integer durations for 'in' bumpers (e.g., [5, 5])
+		"bumpers_out": [],			# List of integer durations for 'out' bumpers (e.g., [5, 5])
+		"commercials": [],			# List of integer durations for selected ads (e.g., [30, 15, 30])
+		"commercials_sum": 0,		# Summed total of all tagged commercial durations in seconds
+		"script_pauses": 0,			# Total seconds of script-induced pauses (e.g., for buffering)
+		"planned_total_window": 0	# Total calculated package duration (show + bumpers + ads)
 	}
 	return telemetry
 
 def set_telemetry(key, value):
 	"""
-	Sets a single key-value pair in the global last_telemetry dictionary.
+	Sets a single key-value pair in the global LAST_TELEMETRY dictionary.
 	Initializes a fresh telemetry structure if one does not already exist.
 
 	:param key: String key matching the telemetry schema.
 	:param value: The value to set (int, str, list, etc.).
 	:return: None
 	"""
-	global last_telemetry
+	global LAST_TELEMETRY
 
-	if last_telemetry is None:
-		last_telemetry = create_fresh_telemetry()
+	if LAST_TELEMETRY is None:
+		LAST_TELEMETRY = create_fresh_telemetry()
 
-	if key in last_telemetry:
-		last_telemetry[key] = value
+	if key in LAST_TELEMETRY:
+		LAST_TELEMETRY[key] = value
 	else:
 		printd("set_telemetry warning: Unknown telemetry key '%s'" % str(key))
 
@@ -2645,9 +3161,9 @@ def prepare_commercials_and_bumpers(source, schedule):
 	"""
 	global current_video_tag
 	global LAST_PROGRAMMING_SCHEDULE
-	global last_telemetry
+	global LAST_TELEMETRY
 	global now
-
+	
 	meta = schedule[4]
 	video_type = schedule[2]
 	source_dir = os.path.dirname(source)
@@ -2656,6 +3172,7 @@ def prepare_commercials_and_bumpers(source, schedule):
 	bumpers = None
 	pregenerated_commercials_list = None
 	# Keep now's simulated date/hour/minute, but attach real-world seconds
+	update_current_time()
 	actual_now = now.replace(second=datetime.datetime.now().second)
 
 	# Handle tag override
@@ -2738,6 +3255,8 @@ def prepare_commercials_and_bumpers(source, schedule):
 
 		# Baseline plan telemetry
 		set_telemetry("start_time", actual_now.strftime("%H:%M:%S"))
+		actual_now_epoch = time.mktime(actual_now.timetuple())
+		set_telemetry("start_time_epoch", actual_now_epoch)
 		set_telemetry("show_length", source_total_length)
 		set_telemetry("calc_fill", fill_time)
 		set_telemetry("offset_used", offset_val)
@@ -2746,6 +3265,7 @@ def prepare_commercials_and_bumpers(source, schedule):
 		# Target boundary calculation (:00 or :30)
 		target_end_dt = actual_now + datetime.timedelta(seconds=(source_total_length + fill_time))
 		set_telemetry("target_boundary", target_end_dt.strftime("%H:%M:%S"))
+		set_telemetry("end_time_epoch", actual_now_epoch + source_total_length + fill_time)
 
 		# Track bumper lengths
 		b_in_lengths = []
@@ -2932,9 +3452,27 @@ def onStartup():
 
 onStartup() # Call the onStartup function to report that the script has started
 
+cache_dir = get_setting(["cache_path"], "")
+active_timeline_path = os.path.join(cache_dir, "active_timeline.json") if cache_dir else "active_timeline.json"
+
 while True:
 	try:
-		last_telemetry = create_fresh_telemetry() # Reset telemetry for each loop iteration
+		# Check if we should resume from an active timeline
+		if get_setting(["resume active timeline"], False) and is_active_timeline_valid(active_timeline_path):
+			printd("Active Timeline Validated. Playing from timeline.")
+			report_error("PLAY_TIMELINE", ["Resuming from active timeline.", active_timeline_path])
+			# Play the timeline and handle success/failure
+			success = play_video_timeline(active_timeline_path)
+
+			# If playback fails, report the error and clear the cached timeline to avoid repeated failures
+			if not success:
+				report_error("PLAY_TIMELINE", ["Failed to play from active timeline. Resetting timeline and continuing loop."])
+			else:
+				printd("Successfully played from active timeline. Resetting timeline and continuing loop.")
+				cache_delete("active_timeline.json")
+				continue  # Skip to the next iteration of the main loop
+
+		LAST_TELEMETRY = create_fresh_telemetry() # Reset telemetry for each loop iteration
 
 		# Error channel timeout
 		if (time.time() - start_time) > 59 and error_channel_set: # if an error channel is set and no video has played in 60 seconds, exit script
@@ -3010,6 +3548,32 @@ while True:
 		# Commercials and bumpers
 		commercials_per_break, pregenerated_commercials_list, bumpers = prepare_commercials_and_bumpers(source, programming_schedule)
 
+		# Telemetry and caching for potential resume
+		# If the "resume active timeline" setting is enabled, compile the broadcast timeline and cache it for potential resume after playback.
+		if get_setting(["resume active timeline"], False):
+			printd("Active timeline resume enabled. Caching timeline for potential resume.")
+			# We need to get the delay modifier for accurate timeline compilation, even if commercials are pregenerated.
+			delay_mod = get_setting(["commercials_delay_modifier"], 0.75)
+			# Build the complete, chronological run-sheet
+			playlist_timeline = compile_broadcast_timeline(
+				source=source,
+				pregenerated_commercials_list=pregenerated_commercials_list,
+				bumpers=bumpers,
+				delay_modifier=delay_mod,
+				start_time_dt=now
+			)
+
+			# Since telemetry is already being tracked in the global LAST_TELEMETRY, we can include it in the cached timeline for reference.
+			playlist_timeline = {
+				'items': playlist_timeline,
+				'telemetry': LAST_TELEMETRY
+			}
+
+			# Cache the timeline to a JSON file for potential resume
+			cache_file(json.dumps(playlist_timeline), "active_timeline.json")
+
+			printd("Compiled Playlist Items:", len(playlist_timeline), playlist_timeline)
+
 		printd("Attempting to play:", source)
 		printd("PLAY INFO:", [str(now), programming_schedule])
 
@@ -3017,7 +3581,7 @@ while True:
 		play_video_attempts = 0
 		max_attempts = get_setting(['max_play_attempts'], 1)
 		while(success == 0 and play_video_attempts < max_attempts):
-			printd("Last Telemetry:", last_telemetry)
+			printd("Last Telemetry:", LAST_TELEMETRY)
 			success = play_video(
 				source,
 				get_commercials(source),
