@@ -1,5 +1,5 @@
 version:2
-date:2026/11/06
+date:2026/11/22
 
 # clean up old/deprecated files
 remove:/home/pi/Desktop/_rnd80s.py
@@ -14,6 +14,7 @@ remove:/var/www/html/workers/trim_played_by_most_recent.php
 sync:_station.py->/home/pi/Desktop/_station.py
 
 # support scripts
+sync:add_time_to_video_filenames.py->/home/pi/Desktop/add_time_to_video_filenames.py
 sync:restart.sh->/home/pi/Desktop/restart.sh
 sync:startup.sh->/home/pi/Desktop/startup.sh
 sync:stop_script.sh->/home/pi/Desktop/stop_script.sh
@@ -49,22 +50,17 @@ sync:html/manage/MainSettings.php->/var/www/html/manage/MainSettings.php
 sync:html/manage/MainSettings.schema.json->/var/www/html/manage/MainSettings.schema.json
 sync:html/manage/MountedDrivesManager.php->/var/www/html/manage/MountedDrivesManager.php
 sync:html/manage/Plugins.php->/var/www/html/manage/Plugins.php
-sync:html/manage/Takeout.php->/var/www/html/manage/Takeout.php
 sync:html/manage/Programming.php->/var/www/html/manage/Programming.php
 sync:html/manage/StationControl.php->/var/www/html/manage/StationControl.php
 sync:html/manage/SystemUpdater.php->/var/www/html/manage/SystemUpdater.php
 sync:html/manage/ThemeManager.php->/var/www/html/manage/ThemeManager.php
+sync:html/manage/Takeout.php->/var/www/html/manage/Takeout.php
+sync:html/manage/takeout_manifest.json->/var/www/html/manage/takeout_manifest.json
 sync:html/manage/Workers.php->/var/www/html/manage/Workers.php
 
 # Default Template Theme
 sync:html/templates/source/modern/modern.php->/var/www/html/templates/modern.php
 sync:html/templates/source/modern/modern.preview.png->/var/www/html/templates/modern.preview.png
-
-# Workers
-sync:html/workers/db_helper.inc->/var/www/html/workers/db_helper.inc
-sync:html/workers/empty.php->/var/www/html/workers/empty.php
-sync:html/workers/trim_by_days.php->/var/www/html/workers/trim_by_days.php
-sync:html/workers/trim_by_most_recent.php->/var/www/html/workers/trim_by_most_recent.php
 
 # Optional Template Themes Updates
 ifsync:html/templates/source/windows/windows.php->/var/www/html/templates/windows.php
@@ -73,6 +69,14 @@ ifsync:html/templates/source/broadcast/broadcast.php->/var/www/html/templates/br
 ifsync:html/templates/source/broadcast/broadcast.preview.png->/var/www/html/templates/broadcast.preview.png
 ifsync:html/templates/source/niteowl/niteowl.php->/var/www/html/templates/niteowl.php
 ifsync:html/templates/source/niteowl/niteowl.preview.png->/var/www/html/templates/niteowl.preview.png
+ifsync:html/templates/source/radio/radio.php->/var/www/html/templates/radio.php
+ifsync:html/templates/source/radio/radio.preview.png->/var/www/html/templates/radio.preview.png
+
+# Workers
+sync:html/workers/db_helper.inc->/var/www/html/workers/db_helper.inc
+sync:html/workers/empty.php->/var/www/html/workers/empty.php
+sync:html/workers/trim_by_days.php->/var/www/html/workers/trim_by_days.php
+sync:html/workers/trim_by_most_recent.php->/var/www/html/workers/trim_by_most_recent.php
 
 # Optional Plugin Updates
 ifsync:plugins/source/pip/picture-in-picture.py->/home/pi/Desktop/plugins/picture-in-picture.py
