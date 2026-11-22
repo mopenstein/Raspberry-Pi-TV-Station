@@ -21,12 +21,12 @@ if (($json_settings = $json_response[0]) === null) {
 }
 
 // 2. Data Extraction with Null Coalescing
-$drive_loc     = $json_settings["drive"] ?? '';
+$drive_loc	 = $json_settings["drive"] ?? '';
 $database_info = $json_settings["web-ui"]["database_info"] ?? [];
 $settings_name = $json_settings["name"] ?? "";
 
 // 3. Channel Mapping
-$channels      = $json_settings["channels"]["names"] ?? [];
+$channels	  = $json_settings["channels"]["names"] ?? [];
 $channel_file  = $json_settings["channels"]["file"] ?? '';
 
 //######################### /settings
@@ -162,19 +162,19 @@ function isDriveAllowed(string $path, array $drives): bool {
 }
 
 if (isset($_GET['get_live_status'])) {
-    header('Content-Type: application/json');
-    
-    $status_file = '/dev/shm/tv_status.json';
-    
-    if (file_exists($status_file)) {
-        die(file_get_contents($status_file));
-    } else {
-        die(json_encode([
-            "state" => "offline",
-            "file" => "",
-            "position" => 0
-        ]));
-    }
+	header('Content-Type: application/json');
+	
+	$status_file = '/dev/shm/tv_status.json';
+	
+	if (file_exists($status_file)) {
+		die(file_get_contents($status_file));
+	} else {
+		die(json_encode([
+			"state" => "offline",
+			"file" => "",
+			"position" => 0
+		]));
+	}
 }
 
 if(isset($_GET['get_last_played'])) {
@@ -206,48 +206,48 @@ if(isset($_GET['get_last_played'])) {
 }
 
 if(isset($_GET['get_last_comm_played'])) {
-    $result = $mysqli->query("SELECT * FROM commercials ORDER BY id DESC LIMIT 1") or die($mysqli->error);
-    $last_played = null;
-    if ($result->num_rows > 0) {
-        $last_played = $result->fetch_assoc();
-    }
-    
-    if (!$last_played) {
-        die(json_encode([
-            "name" => "ERROR: NOT FOUND",
-            "short_name" => "ERROR",
-            "played" => -1,
-            "id" => -1,
-            "len" => -1
-        ]));
-    }
+	$result = $mysqli->query("SELECT * FROM commercials ORDER BY id DESC LIMIT 1") or die($mysqli->error);
+	$last_played = null;
+	if ($result->num_rows > 0) {
+		$last_played = $result->fetch_assoc();
+	}
+	
+	if (!$last_played) {
+		die(json_encode([
+			"name" => "ERROR: NOT FOUND",
+			"short_name" => "ERROR",
+			"played" => -1,
+			"id" => -1,
+			"len" => -1
+		]));
+	}
 
-    $response = [
-        "name" => rawurlencode($last_played["name"]),
-        "short_name" => null,
-        "played" => (int)$last_played["played"],
-        "id" => (int)$last_played["id"],
-        "len" => (int)substr($last_played["name"], strpos($last_played["name"], "%T(") + 3, strpos($last_played["name"], ")%") - strpos($last_played["name"], "%T(") - 3)
-    ];
+	$response = [
+		"name" => rawurlencode($last_played["name"]),
+		"short_name" => null,
+		"played" => (int)$last_played["played"],
+		"id" => (int)$last_played["id"],
+		"len" => (int)substr($last_played["name"], strpos($last_played["name"], "%T(") + 3, strpos($last_played["name"], ")%") - strpos($last_played["name"], "%T(") - 3)
+	];
 
-    // Optional 'since' parameter: appends every commercial aired after the supplied unixtime
-    if (isset($_GET['since']) && is_numeric($_GET['since'])) {
-        $since = (int)$_GET['since'];
-        $history_result = $mysqli->query("SELECT id, name, played FROM commercials WHERE played > {$since} ORDER BY played ASC") or die($mysqli->error);
+	// Optional 'since' parameter: appends every commercial aired after the supplied unixtime
+	if (isset($_GET['since']) && is_numeric($_GET['since'])) {
+		$since = (int)$_GET['since'];
+		$history_result = $mysqli->query("SELECT id, name, played FROM commercials WHERE played > {$since} ORDER BY played ASC") or die($mysqli->error);
 
-        $history = [];
-        while ($row = $history_result->fetch_assoc()) {
-            $history[] = [
-                "id" => (int)$row["id"],
-                "name" => rawurlencode($row["name"]),
-                "played" => (int)$row["played"],
-                "len" => (int)substr($row["name"], strpos($row["name"], "%T(") + 3, strpos($row["name"], ")%") - strpos($row["name"], "%T(") - 3)
-            ];
-        }
-        $response["commercials"] = $history;
-    }
+		$history = [];
+		while ($row = $history_result->fetch_assoc()) {
+			$history[] = [
+				"id" => (int)$row["id"],
+				"name" => rawurlencode($row["name"]),
+				"played" => (int)$row["played"],
+				"len" => (int)substr($row["name"], strpos($row["name"], "%T(") + 3, strpos($row["name"], ")%") - strpos($row["name"], "%T(") - 3)
+			];
+		}
+		$response["commercials"] = $history;
+	}
 
-    die(json_encode($response));
+	die(json_encode($response));
 }
 
 if (isset($_GET['rename_video'], $_GET['to'])) {
@@ -302,58 +302,58 @@ if(isset($_GET["channel"]) && count($_GET)==1) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'reboot') {
-    // 1. Send clean HTTP headers and clear buffer
-    ignore_user_abort(true);
-    set_time_limit(0);
+	// 1. Send clean HTTP headers and clear buffer
+	ignore_user_abort(true);
+	set_time_limit(0);
 
-    // 2. Render holding UI to the browser
-    ?>
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Rebooting...</title>
-        <style>
-            body { font-family: monospace; background: #111; color: #0f0; padding: 40px; text-align: center; }
-            .box { border: 1px solid #333; display: inline-block; padding: 20px 40px; border-radius: 6px; }
-        </style>
-        <script>
-            // Poll the root page every 5 seconds until the Pi comes back up, then reload cleanly
-            function checkServer() {
-                fetch('/', { method: 'HEAD', cache: 'no-store' })
-                    .then(response => {
-                        if (response.ok) window.location.href = '/';
-                        else setTimeout(checkServer, 5000);
-                    })
-                    .catch(() => setTimeout(checkServer, 5000));
-            }
-            // Start polling after 20 seconds (give it time to actually shut down)
-            setTimeout(checkServer, 20000);
-        </script>
-    </head>
-    <body>
-        <div class="box">
-            <h2>Rebooting System</h2>
-            <p>Station reboot initiated. This page will automatically reload once the Pi is back online.</p>
-        </div>
-    </body>
-    </html>
-    <?php
+	// 2. Render holding UI to the browser
+	?>
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<title>Rebooting...</title>
+		<style>
+			body { font-family: monospace; background: #111; color: #0f0; padding: 40px; text-align: center; }
+			.box { border: 1px solid #333; display: inline-block; padding: 20px 40px; border-radius: 6px; }
+		</style>
+		<script>
+			// Poll the root page every 5 seconds until the Pi comes back up, then reload cleanly
+			function checkServer() {
+				fetch('/', { method: 'HEAD', cache: 'no-store' })
+					.then(response => {
+						if (response.ok) window.location.href = '/';
+						else setTimeout(checkServer, 5000);
+					})
+					.catch(() => setTimeout(checkServer, 5000));
+			}
+			// Start polling after 20 seconds (give it time to actually shut down)
+			setTimeout(checkServer, 20000);
+		</script>
+	</head>
+	<body>
+		<div class="box">
+			<h2>Rebooting System</h2>
+			<p>Station reboot initiated. This page will automatically reload once the Pi is back online.</p>
+		</div>
+	</body>
+	</html>
+	<?php
 
-    // 3. Force output to browser and close connection
-    if (ob_get_level() > 0) {
-        ob_end_flush();
-    }
-    flush();
+	// 3. Force output to browser and close connection
+	if (ob_get_level() > 0) {
+		ob_end_flush();
+	}
+	flush();
 
-    // FastCGI / Apache hook to close client socket immediately
-    if (function_exists('fastcgi_finish_request')) {
-        fastcgi_finish_request();
-    }
+	// FastCGI / Apache hook to close client socket immediately
+	if (function_exists('fastcgi_finish_request')) {
+		fastcgi_finish_request();
+	}
 
-    // 4. Trigger reboot detached in the background
-    exec('sleep 1 && sudo /sbin/reboot >/dev/null 2>&1 &');
-    exit;
+	// 4. Trigger reboot detached in the background
+	exec('sleep 1 && sudo /sbin/reboot >/dev/null 2>&1 &');
+	exit;
 }
 
 if(isset($_GET["rebootz"])) {
@@ -1188,20 +1188,20 @@ function handleRandomVideoByCount($episode, $filter) {
 }
 
 function isStationRunning() {
-    // Specifically match python executing _station.py to prevent false positives
-    $output = shell_exec('pgrep -f "^python.*_station\.py" 2>/dev/null');
-    return !empty(trim($output));
+	// Specifically match python executing _station.py to prevent false positives
+	$output = shell_exec('pgrep -f "^python.*_station\.py" 2>/dev/null');
+	return !empty(trim($output));
 }
 
 // Place in functions.php
 if (isset($_GET['station_status'])) {
-    header('Content-Type: application/json');
-    header('Cache-Control: no-cache, no-store, must-revalidate');
-    echo json_encode([
-        'running' => isStationRunning(),
-        'timestamp' => time()
-    ]);
-    exit;
+	header('Content-Type: application/json');
+	header('Cache-Control: no-cache, no-store, must-revalidate');
+	echo json_encode([
+		'running' => isStationRunning(),
+		'timestamp' => time()
+	]);
+	exit;
 }
 
 function getRandomVideoByCount($directory, $filter = "mp4,mkv,avi,mpeg,mpg,mov,webm,m4v,flv,wmv") {
@@ -1344,9 +1344,9 @@ function formatChannelName($ch) {
 
 if (isset($_GET["current_video"])) {
 	$current_video = urldecode($_GET["current_video"]);
-	$channel       = $_GET["channel"] ?? null;
-	$data       = $_GET["data"] ?? null;
-	$debug         = isset($_GET["d"]);
+	$channel	   = $_GET["channel"] ?? null;
+	$data	   = $_GET["data"] ?? null;
+	$debug		 = isset($_GET["d"]);
 
 	logPlayback($mysqli, $current_video, $parsedShows, $channel, $debug, null, $data);
 	
@@ -1359,7 +1359,7 @@ if(isset($_GET["error"])) {
 }
 
 if (isset($_GET["current_comm"])) {
-	$name      = $_GET["current_comm"];
+	$name	  = $_GET["current_comm"];
 	$timestamp = time();
 	$channel   = isset($_GET["channel"]) ? formatChannelName(trim($_GET["channel"])) : null;
 

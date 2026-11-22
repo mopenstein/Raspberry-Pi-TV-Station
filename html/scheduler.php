@@ -291,9 +291,68 @@ $active_filename = basename($schedule_file);
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		gap: 8px;
 		z-index: 50;
 	}
+	.footer-actions {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+		flex-shrink: 0;
+	}
 	.status-text { font-size: 0.8rem; color: var(--text-muted); }
+
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.72);
+		display: none;
+		align-items: center;
+		justify-content: center;
+		padding: 14px;
+		z-index: 100;
+	}
+	.modal-backdrop.open {
+		display: flex;
+	}
+	.modal-dialog {
+		background: var(--card-bg);
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		width: 100%;
+		max-width: 540px;
+		padding: 14px;
+		box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+	}
+	.modal-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+	.modal-title {
+		font-size: 0.95rem;
+		font-weight: 700;
+	}
+	.modal-sub {
+		font-size: 0.78rem;
+		color: var(--text-muted);
+		margin-bottom: 10px;
+	}
+	.bulk-textarea {
+		width: 100%;
+		min-height: 180px;
+		background: #0d1117;
+		border: 1px solid var(--border);
+		color: var(--text);
+		padding: 10px;
+		border-radius: 6px;
+		font-family: monospace;
+		font-size: 0.8rem;
+		resize: vertical;
+		margin-bottom: 10px;
+	}
+	.bulk-textarea:focus { border-color: var(--primary); outline: none; }
 </style>
 </head>
 <body>
@@ -336,9 +395,27 @@ $active_filename = basename($schedule_file);
 	<div id="showsList"></div>
 </main>
 
+<div id="bulkJsonModal" class="modal-backdrop" onclick="if(event.target===this) closeBulkJsonModal()">
+	<div class="modal-dialog">
+		<div class="modal-header">
+			<span class="modal-title">Bulk Import JSON</span>
+			<button type="button" class="btn-icon" style="padding:2px 8px;" onclick="closeBulkJsonModal()">&times;</button>
+		</div>
+		<p class="modal-sub">Paste a JSON object mapping categories to arrays of artists/shows. New categories are created automatically and changes save immediately.</p>
+		<textarea id="bulkJsonInput" class="bulk-textarea" placeholder='{"Top 40": ["Artist A", "Artist B"], "Hard Rock": ["Artist C"]}' oninput="this.style.borderColor='var(--border)'"></textarea>
+		<div class="add-row" style="justify-content:flex-end;">
+			<button type="button" class="btn btn-outline" onclick="closeBulkJsonModal()">Cancel</button>
+			<button type="button" class="btn" onclick="handleBulkJsonImport()">Import &amp; Save</button>
+		</div>
+	</div>
+</div>
+
 <footer class="footer-bar">
 	<span id="statusIndicator" class="status-text">Schedule ready</span>
-	<button class="btn" onclick="saveToServer()">Save Changes</button>
+	<div class="footer-actions">
+		<button type="button" class="btn btn-outline" onclick="openBulkJsonModal()">Bulk JSON</button>
+		<button type="button" class="btn" onclick="saveToServer()">Save Changes</button>
+	</div>
 </footer>
 
 <script>
@@ -356,6 +433,11 @@ function cleanTarget(str) {
 	return target.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 }
 
+function getDisplayName(str) {
+	if (!str) return '';
+	return str.indexOf('=') !== -1 ? str.split('=')[1] : str;
+}
+
 function findExistingShow(showName) {
 	let clean = cleanTarget(showName);
 	if (!clean) return null;
@@ -368,6 +450,106 @@ function findExistingShow(showName) {
 		}
 	}
 	return null;
+}
+
+function openBulkJsonModal() {
+	const modal = document.getElementById('bulkJsonModal');
+	const input = document.getElementById('bulkJsonInput');
+	input.style.borderColor = 'var(--border)';
+	modal.classList.add('open');
+	input.focus();
+}
+
+function closeBulkJsonModal() {
+	document.getElementById('bulkJsonModal').classList.remove('open');
+}
+
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape') {
+		closeBulkJsonModal();
+	}
+});
+
+function handleBulkJsonImport() {
+	const input = document.getElementById('bulkJsonInput');
+	const rawText = input.value.trim();
+
+	if (!rawText) {
+		input.style.borderColor = 'var(--danger)';
+		input.focus();
+		return;
+	}
+
+	let parsed;
+	try {
+		parsed = JSON.parse(rawText);
+	} catch (e) {
+		input.style.borderColor = 'var(--danger)';
+		alert("Invalid JSON format:\n" + e.message);
+		return;
+	}
+
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		input.style.borderColor = 'var(--danger)';
+		alert('JSON must be an object mapping category names to arrays of items, e.g. {"Top 40": ["Artist 1"]}');
+		return;
+	}
+
+	let addedCount = 0;
+	let movedCount = 0;
+	let skippedCount = 0;
+	let lastCategory = null;
+
+	for (let rawCat in parsed) {
+		if (!Object.prototype.hasOwnProperty.call(parsed, rawCat)) continue;
+		const catName = String(rawCat).trim();
+		const items = parsed[rawCat];
+
+		if (!catName || !Array.isArray(items)) continue;
+
+		if (!schedule[catName]) {
+			schedule[catName] = [];
+		}
+
+		items.forEach(rawItem => {
+			if (typeof rawItem !== 'string' && typeof rawItem !== 'number') return;
+			const itemStr = String(rawItem).trim();
+			if (!itemStr) return;
+
+			const existing = findExistingShow(itemStr);
+			if (existing) {
+				if (existing.category === catName) {
+					skippedCount++;
+				} else {
+					schedule[existing.category].splice(existing.index, 1);
+					schedule[catName].push(itemStr);
+					movedCount++;
+					lastCategory = catName;
+				}
+			} else {
+				schedule[catName].push(itemStr);
+				addedCount++;
+				lastCategory = catName;
+			}
+		});
+	}
+
+	if (addedCount === 0 && movedCount === 0) {
+		alert(`No new items added (${skippedCount} duplicate(s) already existed in their target categories).`);
+		return;
+	}
+
+	input.value = '';
+	closeBulkJsonModal();
+	if (lastCategory) {
+		activeFilter = lastCategory;
+	}
+	render();
+	saveToServer();
+
+	const status = document.getElementById('statusIndicator');
+	status.innerText = `Bulk imported: ${addedCount} added, ${movedCount} moved, ${skippedCount} skipped`;
+	status.style.color = "var(--success)";
 }
 
 function handleCatSelectChange(val) {
@@ -498,18 +680,6 @@ function reassignShow(oldCat, index, newCat) {
 	if (!schedule[newCat]) schedule[newCat] = [];
 	schedule[newCat].push(showVal);
 	expandedShowId = null;
-	markDirty();
-	render();
-}
-
-function moveShow(cat, index, direction, e) {
-	e.stopPropagation();
-	const targetIdx = index + direction;
-	if (targetIdx < 0 || targetIdx >= schedule[cat].length) return;
-	const temp = schedule[cat][index];
-	schedule[cat][index] = schedule[cat][targetIdx];
-	schedule[cat][targetIdx] = temp;
-	expandedShowId = `${cat}__${targetIdx}`;
 	markDirty();
 	render();
 }
@@ -775,15 +945,16 @@ function render() {
 
 	let visibleItems = [];
 	if (activeFilter === "ALL") {
-		for (let cat in schedule) {
-			schedule[cat].forEach((show, idx) => {
-				visibleItems.push({ cat: cat, index: idx, show: show });
-			});
-		}
-	} else {
-		(schedule[activeFilter] || []).forEach((show, idx) => {
-			visibleItems.push({ cat: activeFilter, index: idx, show: show });
+		categories.forEach(cat => {
+			let sortedCatItems = (schedule[cat] || [])
+				.map((show, idx) => ({ cat: cat, index: idx, show: show }))
+				.sort((a, b) => getDisplayName(a.show).localeCompare(getDisplayName(b.show), undefined, { numeric: true, sensitivity: 'base' }));
+			visibleItems.push(...sortedCatItems);
 		});
+	} else {
+		visibleItems = (schedule[activeFilter] || [])
+			.map((show, idx) => ({ cat: activeFilter, index: idx, show: show }))
+			.sort((a, b) => getDisplayName(a.show).localeCompare(getDisplayName(b.show), undefined, { numeric: true, sensitivity: 'base' }));
 	}
 
 	if (visibleItems.length === 0) {
@@ -829,16 +1000,6 @@ function render() {
 			}).join('');
 			catOptions += `<option value="__DRAWER_CREATE_NEW__">+ New Category...</option>`;
 
-			let reorderButtons = '';
-			if (activeFilter !== "ALL") {
-				reorderButtons = `
-					<div style="display:flex;gap:4px;">
-						<button class="btn-icon" onclick="moveShow('${item.cat}', ${item.index}, -1, event)">&uarr; Up</button>
-						<button class="btn-icon" onclick="moveShow('${item.cat}', ${item.index}, 1, event)">&darr; Down</button>
-					</div>
-				`;
-			}
-
 			drawerHtml = `
 				<div class="show-drawer">
 					<div>
@@ -853,7 +1014,6 @@ function render() {
 							<select id="drawerCatSelect__${item.cat}__${item.index}" class="cat-select" onchange="handleDrawerCatSelect('${item.cat}', ${item.index}, this.value)">
 								${catOptions}
 							</select>
-							${reorderButtons}
 							<button class="btn btn-outline btn-danger btn-sm" onclick="deleteShow('${item.cat}', ${item.index})">Delete</button>
 						</div>
 

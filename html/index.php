@@ -9,146 +9,167 @@ require_once("db_manage_extx.inc");
 require_once("functions.php");
 
 
+// --- CARD COLLAPSE STATE ENDPOINT (Add after setup check in index.php) ---
+$card_state_file = __DIR__ . '/manage/card_states.json';
+
+if (isset($_POST['toggle_manage_card'])) {
+	header('Content-Type: application/json');
+	$card_key = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['toggle_manage_card']);
+	$is_collapsed = !empty($_POST['collapsed']) && $_POST['collapsed'] === '1';
+
+	$states = file_exists($card_state_file)
+		? (json_decode(file_get_contents($card_state_file), true) ?: [])
+		: [];
+
+	if ($card_key !== '') {
+		$states[$card_key] = $is_collapsed;
+		file_put_contents($card_state_file, json_encode($states, JSON_PRETTY_PRINT));
+	}
+
+	echo json_encode(['ok' => true, 'card' => $card_key, 'collapsed' => $is_collapsed]);
+	exit;
+}
+
 $setup_state_file = __DIR__ . '/setup/state.json';
 
 // If setup has never run, or is incomplete, redirect to the wizard
 if (file_exists($setup_state_file)) {
-    $state = json_decode(file_get_contents($setup_state_file), true);
-    
-    // Check if the wizard is still in progress (not marked complete)
-    if (!isset($state['step']) || $state['step'] !== 'complete') {
-        header('Location: /setup/');
-        exit;
-    }
+	$state = json_decode(file_get_contents($setup_state_file), true);
+	
+	// Check if the wizard is still in progress (not marked complete)
+	if (!isset($state['step']) || $state['step'] !== 'complete') {
+		header('Location: /setup/');
+		exit;
+	}
 } else {
-    // No state file exists at all -> send to setup
-    header('Location: /setup/');
-    exit;
+	// No state file exists at all -> send to setup
+	header('Location: /setup/');
+	exit;
 }
 
 /**
  * Generates the HTML select dropdown for channels based on settings
  */
 function generateChannelSelect($channels, $curr_channel_view) {
-    if (empty($channels)) {
-        return "default";
-    }
+	if (empty($channels)) {
+		return "default";
+	}
 
-    $html = '<select name="channel" onchange="window.location=\'/?channelView=\'+this.value;">';
-    
-    foreach ($channels as $c) {
-        if (!is_string($c) && $c !== null) continue;
+	$html = '<select name="channel" onchange="window.location=\'/?channelView=\'+this.value;">';
+	
+	foreach ($channels as $c) {
+		if (!is_string($c) && $c !== null) continue;
 
-        // Normalize name for display/value
-        $val = ($c === null || $c === "") ? "default" : $c;
-        
-        // Determine selection state
-        $is_selected = ($c === $curr_channel_view || ($curr_channel_view === null && $val === "default"));
-        $selected_attr = $is_selected ? ' selected' : '';
-        
-        $safe_val = htmlspecialchars($val);
-        $html .= '<option value="' . $safe_val . '"' . $selected_attr . '>' . $safe_val . '</option>';
-    }
+		// Normalize name for display/value
+		$val = ($c === null || $c === "") ? "default" : $c;
+		
+		// Determine selection state
+		$is_selected = ($c === $curr_channel_view || ($curr_channel_view === null && $val === "default"));
+		$selected_attr = $is_selected ? ' selected' : '';
+		
+		$safe_val = htmlspecialchars($val);
+		$html .= '<option value="' . $safe_val . '"' . $selected_attr . '>' . $safe_val . '</option>';
+	}
 
-    $html .= '</select>';
-    return $html;
+	$html .= '</select>';
+	return $html;
 }
 
 function getLocalTemperature() {
-    $f = fopen("/sys/class/thermal/thermal_zone0/temp","r");
-    $int_temp = fgets($f);
-    fclose($f);
-    return $int_temp;
+	$f = fopen("/sys/class/thermal/thermal_zone0/temp","r");
+	$int_temp = fgets($f);
+	fclose($f);
+	return $int_temp;
 }
 
 function getUptime($mysqli) {
-    $res = $mysqli->query("SELECT name FROM errors WHERE name LIKE '%UPTIME%' ORDER BY id DESC LIMIT 1");
-    $row = $res->fetch_assoc();
-    return ($row) ? gmdate("H:i:s", (int)explode("|", $row["name"])[1]) : "00:00:00";
+	$res = $mysqli->query("SELECT name FROM errors WHERE name LIKE '%UPTIME%' ORDER BY id DESC LIMIT 1");
+	$row = $res->fetch_assoc();
+	return ($row) ? gmdate("H:i:s", (int)explode("|", $row["name"])[1]) : "00:00:00";
 }
 
 function renderView($filePath, $View) {
-    if (!file_exists($filePath)) return "Template not found: $filePath";
-    ob_start();
-    // This makes the $View array accessible inside your template
-    include($filePath);
-    return ob_get_clean();
+	if (!file_exists($filePath)) return "Template not found: $filePath";
+	ob_start();
+	// This makes the $View array accessible inside your template
+	include($filePath);
+	return ob_get_clean();
 }
 
 
 function prepareShowRow($row) {
-    global $parsedShows; 
-    $showType = getShowType($row["short_name"], $parsedShows);
+	global $parsedShows; 
+	$showType = getShowType($row["short_name"], $parsedShows);
 
-    // Extract length %T(...)%
-    $a = strpos($row["name"], "%T(");
-    $b = strpos($row["name"], ")%", $a+1);
+	// Extract length %T(...)%
+	$a = strpos($row["name"], "%T(");
+	$b = strpos($row["name"], ")%", $a+1);
 	$secondsLength = ($a > -1 && $b > -1) ? (int)substr($row["name"], $a + 3, $b-$a - 3) : 0;
-    $lengthValue = ($a > -1 && $b > -1) ? gmdate("H:i:s", (int)substr($row["name"], $a + 3, $b-$a - 3)) : "";
+	$lengthValue = ($a > -1 && $b > -1) ? gmdate("H:i:s", (int)substr($row["name"], $a + 3, $b-$a - 3)) : "";
 
-    $color = getShowTypeColor($showType);
+	$color = getShowTypeColor($showType);
 
-    // This array acts as the "Contract" with your HTML template
-    return [
-        'id'    => $row["id"],
-        'color' => $color,
-        'timestamp'  => $row["played"], 			// Matches $s['timestamp']
-        'name'  => $row["short_name"],             // Matches $s['name']
-        'url'   => urlencode($row["name"]),       // Matches $s['url']
-        'len'   => $lengthValue,                  // Matches $s['len'] - FIXES ERROR
-		'slen'   => $secondsLength,                  // Raw seconds for potential use in JS
-        'type'  => $showType,                     // Matches $s['type']
-        'flag'   => $row["flag"]				  // Matches $s['flag'] for conditional button rendering
-    ];
+	// This array acts as the "Contract" with your HTML template
+	return [
+		'id'	=> $row["id"],
+		'color' => $color,
+		'timestamp'  => $row["played"], 			// Matches $s['timestamp']
+		'name'  => $row["short_name"],			 // Matches $s['name']
+		'url'   => urlencode($row["name"]),	   // Matches $s['url']
+		'len'   => $lengthValue,				  // Matches $s['len'] - FIXES ERROR
+		'slen'   => $secondsLength,				  // Raw seconds for potential use in JS
+		'type'  => $showType,					 // Matches $s['type']
+		'flag'   => $row["flag"]				  // Matches $s['flag'] for conditional button rendering
+	];
 }
 
 function fetchShows($mysqli, $date, $channel) {
-    global $parsedShows;
-    $start = strtotime($date . ' 00:00:00');
-    $end   = strtotime($date . ' 23:59:59');
-    $shows = [];
-    
-    $sql = "SELECT * FROM played WHERE played BETWEEN ? AND ? " . ($channel ? "AND channel = ?" : "AND channel IS NULL") . " ORDER BY id DESC";
-    $stmt = $mysqli->prepare($sql);
-    
-    if ($channel) {
-        $stmt->bind_param("iis", $start, $end, $channel);
-    } else {
-        $stmt->bind_param("ii", $start, $end);
-    }
-    
-    $stmt->execute();
-    $res = $stmt->get_result();
+	global $parsedShows;
+	$start = strtotime($date . ' 00:00:00');
+	$end   = strtotime($date . ' 23:59:59');
+	$shows = [];
+	
+	$sql = "SELECT * FROM played WHERE played BETWEEN ? AND ? " . ($channel ? "AND channel = ?" : "AND channel IS NULL") . " ORDER BY id DESC";
+	$stmt = $mysqli->prepare($sql);
+	
+	if ($channel) {
+		$stmt->bind_param("iis", $start, $end, $channel);
+	} else {
+		$stmt->bind_param("ii", $start, $end);
+	}
+	
+	$stmt->execute();
+	$res = $stmt->get_result();
 
-    while ($row = $res->fetch_assoc()) {
-        $row['showType'] = getShowType($row["name"], $parsedShows);
-        $row['showTypeColor'] = getShowTypeColor($row['showType']);
-        $shows[] = prepareShowRow($row);
-    }
-    return $shows;
+	while ($row = $res->fetch_assoc()) {
+		$row['showType'] = getShowType($row["name"], $parsedShows);
+		$row['showTypeColor'] = getShowTypeColor($row['showType']);
+		$shows[] = prepareShowRow($row);
+	}
+	return $shows;
 }
 
 /**
  * Returns the hex color for a specific show type
  */
 function getShowTypeColor($type) {
-    global $json_settings;
-    return $json_settings["web-ui"]["show_type_colors"][$type] ?? "ffffff";
+	global $json_settings;
+	return $json_settings["web-ui"]["show_type_colors"][$type] ?? "ffffff";
 }
 
 /**
  * Inverts a hex color for text contrast
  */
 function invertColor($hex) {
-    $hex = str_replace('#', '', $hex);
-    if (strlen($hex) !== 6) return '#000000';
-    $new = '';
-    for ($i = 0; $i < 3; $i++) {
-        $rgbDigits = 255 - hexdec(substr($hex, (2 * $i), 2));
-        $hexDigits = ($rgbDigits < 0) ? 0 : dechex($rgbDigits);
-        $new .= (strlen($hexDigits) < 2) ? '0' . $hexDigits : $hexDigits;
-    }
-    return '#' . $new;
+	$hex = str_replace('#', '', $hex);
+	if (strlen($hex) !== 6) return '#000000';
+	$new = '';
+	for ($i = 0; $i < 3; $i++) {
+		$rgbDigits = 255 - hexdec(substr($hex, (2 * $i), 2));
+		$hexDigits = ($rgbDigits < 0) ? 0 : dechex($rgbDigits);
+		$new .= (strlen($hexDigits) < 2) ? '0' . $hexDigits : $hexDigits;
+	}
+	return '#' . $new;
 }
 
 function getCommercialTypeColor($type) {
@@ -164,9 +185,9 @@ function getCommercialTypeColor($type) {
 function fetchCommercials($mysqli, $date, $channel, $drives) {
 	global $json_settings;
 
-    $content_start_time = strtotime($date . ' 00:00:00');
-    $content_end_time   = strtotime($date . ' 23:59:59');
-    $comms = [];
+	$content_start_time = strtotime($date . ' 00:00:00');
+	$content_end_time   = strtotime($date . ' 23:59:59');
+	$comms = [];
 
 $comms_cnt = 0;
 $bit = 1;
@@ -178,12 +199,12 @@ $comms_cnt = mysqli_num_rows($res);
 if ($curr_channel_view === null) {
 	$stmt = $mysqli->prepare("SELECT * FROM commercials WHERE played BETWEEN ? AND ? AND channel IS NULL ORDER BY id DESC");
 	if ($stmt === false) {
-    	die("Prepare failed: " . $mysqli->error);
+		die("Prepare failed: " . $mysqli->error);
 	}
 	$stmt->bind_param("ii", $content_start_time, $content_end_time);
 } else {
-    $stmt = $mysqli->prepare("SELECT * FROM commercials WHERE played BETWEEN ? AND ? AND channel = ? ORDER BY id DESC");
-    $stmt->bind_param("iis", $content_start_time, $content_end_time, $curr_channel_view);
+	$stmt = $mysqli->prepare("SELECT * FROM commercials WHERE played BETWEEN ? AND ? AND channel = ? ORDER BY id DESC");
+	$stmt->bind_param("iis", $content_start_time, $content_end_time, $curr_channel_view);
 }
 
 $stmt->execute();
@@ -236,197 +257,263 @@ while ($row = $res->fetch_assoc()) {
 	}
 
 	$fullPath = stripslashes($row["name"]);
-    $videoUrl = urlencode($fullPath);
+	$videoUrl = urlencode($fullPath);
 
-    $comms[] = [
-        'id'           => $row["id"],
-        'color'        => getCommercialTypeColor($currentType),
-        'timestamp'    => $row["played"],       // Matches $s['timestamp']
-        'folder'       => $splits[count($splits) - 2],
-        'typeLabel'    => $currentType,
-        'emoji'        => $comm_type_emoji[$comm_type] ?? '2753', // Default to '?' emoji if missing
-        'videoUrl'     => $videoUrl,
-        'filename'     => basename($fullPath),
-        'length'       => $len,
-        'flag'         => $row["flag"]
-    ];
+	$comms[] = [
+		'id'		   => $row["id"],
+		'color'		=> getCommercialTypeColor($currentType),
+		'timestamp'	=> $row["played"],	   // Matches $s['timestamp']
+		'folder'	   => $splits[count($splits) - 2],
+		'typeLabel'	=> $currentType,
+		'emoji'		=> $comm_type_emoji[$comm_type] ?? '2753', // Default to '?' emoji if missing
+		'videoUrl'	 => $videoUrl,
+		'filename'	 => basename($fullPath),
+		'length'	   => $len,
+		'flag'		 => $row["flag"]
+	];
 }
 
-    return $comms;
+	return $comms;
 }
 
 /**
  * Handles the repeat detection logic for the Messages tab
  */
 function fetchGroupedMessages($mysqli) {
-    $res = $mysqli->query("SELECT * FROM errors WHERE name NOT LIKE '%UPTIME%' ORDER BY id DESC");
-    $messages = [];
-    $lastMsg = null;
+	$res = $mysqli->query("SELECT * FROM errors WHERE name NOT LIKE '%UPTIME%' ORDER BY id DESC");
+	$messages = [];
+	$lastMsg = null;
 
-    while ($row = $res->fetch_assoc()) {
-        $parts = explode("|", $row["name"]);
-        $header = $parts[0] ?? 'Unknown Error';
-        $details = array_slice($parts, 1);
+	while ($row = $res->fetch_assoc()) {
+		$parts = explode("|", $row["name"]);
+		$header = $parts[0] ?? 'Unknown Error';
+		$details = array_slice($parts, 1);
 
-        if ($header === $lastMsg) {
-            // Increment repeat count on the last item
-            $messages[count($messages) - 1]['repeats']++;
-        } else {
-            $messages[] = [
-				'timestamp'    => $row["played"],
-                'header'  => $header,
-                'details' => $details,
-                'repeats' => 1
-            ];
-            $lastMsg = $header;
-        }
-    }
-    return $messages;
+		if ($header === $lastMsg) {
+			// Increment repeat count on the last item
+			$messages[count($messages) - 1]['repeats']++;
+		} else {
+			$messages[] = [
+				'timestamp'	=> $row["played"],
+				'header'  => $header,
+				'details' => $details,
+				'repeats' => 1
+			];
+			$lastMsg = $header;
+		}
+	}
+	return $messages;
 }
 
 interface ManageCard {
-    public function name();
+	public function name();
 	public function links();
 	public function html();
 }
 
 function prepareManageView($json_settings, $db_manage_ext) {
-    global $mysqli;
+	global $mysqli, $card_state_file;
 
-    $manage_cards = [];
+	$saved_states = file_exists($card_state_file)
+		? (json_decode(file_get_contents($card_state_file), true) ?: [])
+		: [];
 
-    foreach (glob('manage/*.php') as $card_file) {
-        $class_name = pathinfo($card_file, PATHINFO_FILENAME);
+	$manage_cards = [];
 
-        try {
-            // Loading the file can trigger ParseError or CompileError in PHP 7
-            include_once($card_file);
+	foreach (glob('manage/*.php') as $card_file) {
+		$class_name = pathinfo($card_file, PATHINFO_FILENAME);
 
-            if (!class_exists($class_name)) {
-                continue;
-            }
+		try {
+			include_once($card_file);
 
-            if (!is_subclass_of($class_name, 'ManageCard')) {
-                echo "<!-- Skipping $class_name because it does not implement ManageCard interface -->\n";
-                continue;
-            }
+			if (!class_exists($class_name)) {
+				continue;
+			}
 
-            $card_instance = new $class_name();
+			if (!is_subclass_of($class_name, 'ManageCard')) {
+				echo "<!-- Skipping $class_name because it does not implement ManageCard interface -->\n";
+				continue;
+			}
 
-            $card_name = $card_instance->name();
-            if (!$card_name) {
-                echo "<!-- Skipping Card: $class_name because name() is empty -->\n";
-                continue;
-            }
+			$card_instance = new $class_name();
 
-            if (method_exists($card_instance, 'setMysqli')) {
-                $card_instance->setMysqli($mysqli);
-            }
+			$card_name = $card_instance->name();
+			if (!$card_name) {
+				echo "<!-- Skipping Card: $class_name because name() is empty -->\n";
+				continue;
+			}
 
-            if (method_exists($card_instance, 'setSettings')) {
-                $card_instance->setSettings($json_settings);
-            }
+			if (method_exists($card_instance, 'setMysqli')) {
+				$card_instance->setMysqli($mysqli);
+			}
 
-            $priority = 0;
-            if (method_exists($card_instance, 'priority')) {
-                $priority = (int)$card_instance->priority();
-            }
+			if (method_exists($card_instance, 'setSettings')) {
+				$card_instance->setSettings($json_settings);
+			}
+
+			$priority = 0;
+			if (method_exists($card_instance, 'priority')) {
+				$priority = (int)$card_instance->priority();
+			}
 
 			$display = 'default';
-            if (method_exists($card_instance, 'display')) {
-                $display = $card_instance->display();
-            }
+			if (method_exists($card_instance, 'display')) {
+				$display = $card_instance->display();
+			}
 
-            $manage_cards[$class_name] = [
-                'name'     => $card_name,
-                'html'     => $card_instance->html(),
-                'links'    => $card_instance->links(),
-                'priority' => $priority,
-				'display'  => $display
-            ];
+			// Saved state takes priority; otherwise fall back to $display === 'collapsed'
+			$is_collapsed = array_key_exists($class_name, $saved_states)
+				? (bool)$saved_states[$class_name]
+				: true;
 
-        } catch (\Throwable $e) {
-            // Traps both Exceptions and PHP 7 engine Errors (ParseError, TypeError, Error)
-            $safe_file = htmlspecialchars(basename($card_file));
-            $safe_msg  = htmlspecialchars($e->getMessage());
-            $safe_line = (int)$e->getLine();
+			$manage_cards[$class_name] = [
+				'key'	   => $class_name,
+				'name'	  => $card_name,
+				'html'	  => $card_instance->html(),
+				'links'	 => $card_instance->links(),
+				'priority'  => $priority,
+				'display'   => $display,
+				'collapsed' => $is_collapsed
+			];
 
-            $warning_html = '
-            <div style="background: rgba(220, 50, 50, 0.12); border: 1px solid rgba(220, 50, 50, 0.35); border-radius: 4px; padding: 12px 14px; font-size: 0.8rem; color: #f08080; line-height: 1.4; font-family: monospace;">
-                <div style="font-weight: bold; margin-bottom: 4px; font-family: sans-serif;">Card Load Failure: ' . $safe_file . '</div>
-                <div style="color: #ffb4b4; margin-bottom: 4px;">' . $safe_msg . '</div>
-                <div style="opacity: 0.7; font-size: 0.75rem;">Line: ' . $safe_line . ' in ' . $safe_file . '</div>
-            </div>';
+		} catch (\Throwable $e) {
+			$safe_file = htmlspecialchars(basename($card_file));
+			$safe_msg  = htmlspecialchars($e->getMessage());
+			$safe_line = (int)$e->getLine();
 
-            $manage_cards['error_' . $class_name] = [
-                'name'     => 'Error: ' . $class_name,
-                'html'     => $warning_html,
-                'links'    => [],
-                'priority' => -9999 // Anchors broken cards to the bottom of the stack
-            ];
-        }
-    }
+			$warning_html = '
+			<div style="background: rgba(220, 50, 50, 0.12); border: 1px solid rgba(220, 50, 50, 0.35); border-radius: 4px; padding: 12px 14px; font-size: 0.8rem; color: #f08080; line-height: 1.4; font-family: monospace;">
+				<div style="font-weight: bold; margin-bottom: 4px; font-family: sans-serif;">Card Load Failure: ' . $safe_file . '</div>
+				<div style="color: #ffb4b4; margin-bottom: 4px;">' . $safe_msg . '</div>
+				<div style="opacity: 0.7; font-size: 0.75rem;">Line: ' . $safe_line . ' in ' . $safe_file . '</div>
+			</div>';
 
-    uasort($manage_cards, function($a, $b) {
-        return $b['priority'] <=> $a['priority'];
-    });
+			$manage_cards['error_' . $class_name] = [
+				'key'	   => 'error_' . $class_name,
+				'name'	  => 'Error: ' . $class_name,
+				'html'	  => $warning_html,
+				'links'	 => [],
+				'priority'  => -9999,
+				'display'   => 'default',
+				'collapsed' => false
+			];
+		}
+	}
 
-    return [
-        'cards' => $manage_cards
-    ];
+	uasort($manage_cards, function($a, $b) {
+		$colA = !empty($a['collapsed']) ? 1 : 0;
+		$colB = !empty($b['collapsed']) ? 1 : 0;
+		if ($colA !== $colB) {
+			return $colA <=> $colB; // Expanded (0) before Collapsed (1)
+		}
+		return ($b['priority'] ?? 0) <=> ($a['priority'] ?? 0);
+	});
+
+	$toggle_js = <<<'JS'
+<script>
+function sortManageCards(container) {
+	if (!container) return;
+	const items = Array.from(container.children).filter(el => el.classList.contains('card-table-wrapper'));
+	items.sort((a, b) => {
+		const wideA = (a.dataset.mode === 'wide') ? 1 : 0;
+		const wideB = (b.dataset.mode === 'wide') ? 1 : 0;
+		if (wideA !== wideB) return wideA - wideB; // Keep 'wide' cards at the end
+
+		const bodyA = a.children[1];
+		const bodyB = b.children[1];
+		const colA = (bodyA && bodyA.style.display === 'none') ? 1 : 0;
+		const colB = (bodyB && bodyB.style.display === 'none') ? 1 : 0;
+		if (colA !== colB) return colA - colB; // Expanded (0) before Collapsed (1)
+
+		const prioA = parseInt(a.dataset.priority || '0', 10);
+		const prioB = parseInt(b.dataset.priority || '0', 10);
+		return prioB - prioA; // Higher priority first
+	});
+	items.forEach(el => container.appendChild(el));
+}
+
+function toggleManageCard(cardKey, headerEl) {
+	const body = headerEl.nextElementSibling;
+	const btn = headerEl.querySelector('.toggle-icon');
+	const willExpand = (body.style.display === 'none');
+	const nowCollapsed = !willExpand;
+
+	body.style.display = willExpand ? 'block' : 'none';
+	if (btn) btn.textContent = willExpand ? '-' : '+';
+	headerEl.style.borderBottom = willExpand ? '1px solid var(--border)' : 'none';
+
+	sortManageCards(headerEl.closest('.manage-cards-grid'));
+
+	const form = new URLSearchParams();
+	form.append('toggle_manage_card', cardKey);
+	form.append('collapsed', nowCollapsed ? '1' : '0');
+
+	fetch('/', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body: form.toString()
+	}).catch(() => {});
+}
+</script>
+JS;
+
+	return [
+		'cards'	 => $manage_cards,
+		'toggle_js' => $toggle_js
+	];
 }
 
 /**
  * Fetches and processes the Stats tab data
  */
 function fetchStats($mysqli) {
-    global $parsedShows;
-    $stats = [];
-    $num = 0;
+	global $parsedShows;
+	$stats = [];
+	$num = 0;
 
-    $res = $mysqli->query("SELECT id, name, short_name, COUNT(*) as value_occurrence FROM played GROUP BY short_name ORDER BY value_occurrence DESC");
-    
-    while ($row = $res->fetch_assoc()) {
-        $num++;
-        $showType = getShowType($row["short_name"], $parsedShows);
-        $gavail = getGavailPathFromFile($row["name"]);
+	$res = $mysqli->query("SELECT id, name, short_name, COUNT(*) as value_occurrence FROM played GROUP BY short_name ORDER BY value_occurrence DESC");
+	
+	while ($row = $res->fetch_assoc()) {
+		$num++;
+		$showType = getShowType($row["short_name"], $parsedShows);
+		$gavail = getGavailPathFromFile($row["name"]);
 
-        // Pre-calculate URL and JS logic for the template
-        $shortNameSafe = addslashes($row["short_name"]);
-        $divId         = $row["short_name"] . $row["id"];
+		// Pre-calculate URL and JS logic for the template
+		$shortNameSafe = addslashes($row["short_name"]);
+		$divId		 = $row["short_name"] . $row["id"];
 
-        $stats[] = [
-			'id'          => $row["id"],
-            'num'         => $num,
-            'color'       => getShowTypeColor($showType),
-            'showType'    => $showType,
-            'availUrl'    => urlencode($gavail[0] ?? ''),
-            'availDir'    => urlencode($gavail[1] ?? ''),
-            'nextEpUrl'   => urlencode($row["name"]),
-            'nextRndUrl'  => urlencode(dirname($row["name"])),
-            'fullName'    => $row["name"],
-            'shortName'   => $row["short_name"],
+		$stats[] = [
+			'id'		  => $row["id"],
+			'num'		 => $num,
+			'color'	   => getShowTypeColor($showType),
+			'showType'	=> $showType,
+			'availUrl'	=> urlencode($gavail[0] ?? ''),
+			'availDir'	=> urlencode($gavail[1] ?? ''),
+			'nextEpUrl'   => urlencode($row["name"]),
+			'nextRndUrl'  => urlencode(dirname($row["name"])),
+			'fullName'	=> $row["name"],
+			'shortName'   => $row["short_name"],
 			'statsJs'	  => "?showstats=" . addslashes(urlencode($row["short_name"])),
-            'occurrence'  => $row["value_occurrence"]
-        ];
-    }
-    return $stats;
+			'occurrence'  => $row["value_occurrence"]
+		];
+	}
+	return $stats;
 }
 
 /**
  * Helper to replicate your original Gavail path logic
  */
 function getGavailPathFromFile($filename) {
-    $dir = dirname($filename);
-    $base = basename($filename);
-    return [$base, $dir];
+	$dir = dirname($filename);
+	$base = basename($filename);
+	return [$base, $dir];
 }
 
 // --- 1. SETTINGS & DB ---
 $Settings = new Settings();
 $json_response = $Settings->load("/home/pi/Desktop/settings.json");
 if (($json_settings = $json_response[0]) === null) {
-    die("JSON ERROR: " . htmlspecialchars($json_response[1]));
+	die("JSON ERROR: " . htmlspecialchars($json_response[1]));
 }
 
 $db_manage_ext = new DBMANAGEEXT();
@@ -437,27 +524,27 @@ $mysqli = new mysqli($db_info["host"], $db_info["username"], $db_info["password"
 // --- 2. PRELOAD DATA (The $View Object) ---
 $the_date = isset($_GET["date"]) ? $_GET["date"] : "today"; // Simplified for this pass
 $View = [
-    'title' => $json_settings["name"] ?? "Pi Station",
-    'the_date' => $the_date,
-    'sys' => [
+	'title' => $json_settings["name"] ?? "Pi Station",
+	'the_date' => $the_date,
+	'sys' => [
 		'is_broadcasting' => isStationRunning(),
-        'uptime' => getUptime($mysqli),
-        'temp_f' => (round(((getLocalTemperature()/1000) * (9/5))) + 32),
-        'load'   => sys_getloadavg()[0] * 100,
-        'disk'   => []
-    ],
-    'nav' => [
-        'days_links' => '<a href="/?date=' . urlencode(date('m/d/y', strtotime($the_date) - 86400)) . '">&lt;&lt;&lt;</a> | <a href="/">' . date("h:i A \o\\n l m/d/Y") . '</a>',
-        'channel_select' => generateChannelSelect($json_settings["channels"]["names"] ?? [], $_GET["channelView"] ?? null)
-    ],
-    'data' => [
-        'shows' => [],
-        'commercials' => [],
-        'comm_stats' => [],
-        'messages' => [],
-        'stats_rows' => [],
-        'stats_summary' => []
-    ]
+		'uptime' => getUptime($mysqli),
+		'temp_f' => (round(((getLocalTemperature()/1000) * (9/5))) + 32),
+		'load'   => sys_getloadavg()[0] * 100,
+		'disk'   => []
+	],
+	'nav' => [
+		'days_links' => '<a href="/?date=' . urlencode(date('m/d/y', strtotime($the_date) - 86400)) . '">&lt;&lt;&lt;</a> | <a href="/">' . date("h:i A \o\\n l m/d/Y") . '</a>',
+		'channel_select' => generateChannelSelect($json_settings["channels"]["names"] ?? [], $_GET["channelView"] ?? null)
+	],
+	'data' => [
+		'shows' => [],
+		'commercials' => [],
+		'comm_stats' => [],
+		'messages' => [],
+		'stats_rows' => [],
+		'stats_summary' => []
+	]
 ];
 // In index.php under the preload section
 
@@ -465,7 +552,7 @@ $View = [
 $View['sys']['disk'][] = 'Root SD ' . floor(disk_free_space("/.") / (1024**3)) . 'GB';
 foreach (($json_settings["drive"] ?? []) as $drive) {
 	if (is_dir($drive)) {
-    	$View['sys']['disk'][] = floor(disk_free_space($drive) / (1024**3)) . "GB";
+		$View['sys']['disk'][] = floor(disk_free_space($drive) / (1024**3)) . "GB";
 	} else {
 		$View['sys']['disk'][] = "N/A";
 	}
@@ -474,11 +561,11 @@ foreach (($json_settings["drive"] ?? []) as $drive) {
 // --- 3. FETCH & PROCESS EVERYTHING ---
 // (Logic calls to helper functions in functions.php)
 $View['timestamp'] = time(); // current timestamp for cache-busting or display purposes
-$View['data']['shows']       = fetchShows($mysqli, $the_date, $_GET["channelView"] ?? null);
+$View['data']['shows']	   = fetchShows($mysqli, $the_date, $_GET["channelView"] ?? null);
 $View['data']['commercials'] = fetchCommercials($mysqli, $the_date, $_GET["channelView"] ?? null, $json_settings["drive"] ?? []);
 
-$View['data']['messages']    = fetchGroupedMessages($mysqli);
-$View['data']['stats']     = fetchStats($mysqli);
+$View['data']['messages']	= fetchGroupedMessages($mysqli);
+$View['data']['stats']	 = fetchStats($mysqli);
 
 $View['data']['manage'] = prepareManageView($json_settings, $db_manage_ext);
 
