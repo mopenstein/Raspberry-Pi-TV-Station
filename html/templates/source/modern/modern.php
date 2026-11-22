@@ -221,6 +221,23 @@
 			width: 100%;
 		}
 
+        /* Manage Cards Masonry Layout */
+        .manage-cards-grid {
+            columns: 300px;
+            column-gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .manage-cards-grid .card-table-wrapper {
+            break-inside: avoid;
+            margin-bottom: 1.5rem;
+        }
+
+        .manage-cards-grid .card-table-wrapper.card-layout-wide {
+			column-span: all;
+			margin-top: 1.5rem;
+		}
+
         table { width: 100%; border-collapse: collapse; text-align: left; }
         th { 
             background: rgba(255, 255, 255, 0.03);
@@ -678,9 +695,14 @@
 						$grouped[$mode][$key] = $card;
 					}
 
-					// 2. Sort each group internally by priority (descending)
+					// 2. Sort each group internally: expanded first, then priority (descending)
 					foreach ($grouped as $mode => &$groupCards) {
 						uasort($groupCards, function($a, $b) {
+							$colA = !empty($a['collapsed']) ? 1 : 0;
+							$colB = !empty($b['collapsed']) ? 1 : 0;
+							if ($colA !== $colB) {
+								return $colA <=> $colB;
+							}
 							return ($b['priority'] ?? 0) <=> ($a['priority'] ?? 0);
 						});
 					}
@@ -694,24 +716,22 @@
 					}
 				?>
 
-				<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+				<?= $View['data']['manage']['toggle_js'] ?>
+				<div class="manage-cards-grid">
 					<?php foreach ($render_order as $mode): ?>
 						<?php if (empty($grouped[$mode])) continue; ?>
 						<?php foreach ($grouped[$mode] as $cards): ?>
-							<div class="card-table-wrapper card-layout-<?= htmlspecialchars($mode) ?>">
-								<?php if ($mode === 'collapsed'): ?>
-									<div style="padding: 1rem; border-bottom: 1px solid var(--border); font-size: 1rem; cursor: pointer;" 
-										onclick="var b = this.nextElementSibling; b.style.display = b.style.display === 'none' ? 'block' : 'none';">
-										<?= htmlspecialchars($cards['name']) ?> (click to expand)
-									</div>
-									<div style="display: none;">
-								<?php else: ?>
-									<h3 style="padding: 1rem; border-bottom: 1px solid var(--border); font-size: 1rem;">
-										<?= htmlspecialchars($cards['name']) ?>
-									</h3>
-									<div>
-								<?php endif; ?>
+							<?php $is_collapsed = !empty($cards['collapsed']); ?>
+							<div class="card-table-wrapper card-layout-<?= htmlspecialchars($mode) ?>" data-priority="<?= (int)($cards['priority'] ?? 0) ?>" data-mode="<?= htmlspecialchars($mode) ?>">
+								<div style="padding: 1rem; border-bottom: <?= $is_collapsed ? 'none' : '1px solid var(--border)' ?>; font-size: 1rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center;"
+									onclick="toggleManageCard('<?= htmlspecialchars($cards['key'], ENT_QUOTES) ?>', this)">
+									<span style="font-weight: bold;"><?= htmlspecialchars($cards['name']) ?></span>
+									<button type="button" class="toggle-icon" style="background: none; border: 1px solid var(--border); border-radius: 4px; width: 24px; height: 24px; cursor: pointer; line-height: 1; font-weight: bold; color: inherit;">
+										<?= $is_collapsed ? '+' : '-' ?>
+									</button>
+								</div>
 
+								<div style="display: <?= $is_collapsed ? 'none' : 'block' ?>;">
 									<?php if (!empty($cards['links'])): ?>
 										<?php
 										$count = 0;
@@ -754,7 +774,6 @@
 					<?php endforeach; ?>
 				</div>
 			<?php endif; ?>
-            </div>
         </section>
 
         <!-- Stats -->
