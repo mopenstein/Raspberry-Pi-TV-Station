@@ -98,7 +98,7 @@ def get_setting(find, default=None):
 	Example usage:
 
 	>>> settings = {
-	...	 "version": "0.992",
+	...	 "version": "0.997",
 	...	 "drive": ["/media/pi/ssd", "/media/pi/ssd_b"],
 	...	 "channels": {
 	...		 "error": "Error",
@@ -238,46 +238,189 @@ def IsMothersDay(daysFromMothersDay):
 	#target_date = mothers_day_date + datetime.timedelta(days=daysFromMothersDay)
 	return is_date_within_range(datetime.date(now.year, now.month, now.day), mothers_day_date, daysFromMothersDay)
 
+HOLIDAY_NAMES = [ "thanksgiving", "xmas", "halloween", "mothers day", "fathers day", "memorial day", "easter", "new years day", "mlk day", "valentines day", "presidents day", "st patricks day", "april fools day", "independence day", "4th of july", "labor day", "columbus day", "veterans day", "christmas eve", "christmas", "new years eve" ]
+
+def get_holiday_datetime(holiday, year=None):
+	"""
+	Calculates Thanksgiving (4th Thursday of Nov) for a given year.
+	
+	:param holiday: The name of the holiday to calculate.
+	:param year: The year to calculate the holiday for. If None, uses the current year
+
+	:return: A datetime object representing the holiday date and time, or -1 if the holiday is not recognized.
+	"""
+	global now
+	search_year = year if year is not None else now.year
+	holiday = holiday.lower().replace(" ", "")
+	ret = -1
+
+	if holiday == "thanksgiving":
+	# Thanksgiving is the 4th Thursday of November (falls between Nov 22 and Nov 28)
+		first_of_nov = datetime.datetime(search_year, 11, 1)
+		dw = first_of_nov.weekday()
+		day = 22 + (10 - dw) % 7
+		ret = datetime.datetime(search_year, 11, day, now.hour, now.minute)
+
+	elif holiday == "mothersday":
+		# Mother's Day is the 2nd Sunday in May
+		may_first = datetime.datetime(search_year, 5, 1)
+		# Calculate the first Sunday, then add 7 days for the second Sunday
+		first_sunday_day = 1 + (6 - may_first.weekday() + 7) % 7
+		day = first_sunday_day + 7
+		ret = datetime.datetime(search_year, 5, day, now.hour, now.minute)
+
+	elif holiday == "xmas":
+		# The "xmas" keyword is used to check for the period after Thanksgiving and on or before Christmas.
+		# For a true Christmas check, use the holiday "christmas"
+		first_of_nov = datetime.datetime(search_year, 11, 1)
+		dw = first_of_nov.weekday()
+		day = 22 + (10 - dw) % 7
+		tg = datetime.datetime(search_year, 11, day, now.hour, now.minute)
+		cd = datetime.datetime(search_year, 12, 25, now.hour, now.minute)
+		if now > tg and now <= cd:
+			ret = cd
+
+	elif holiday == "christmas":
+		# Christmas is a fixed date: Dec 25th. If you want to check for the period after Thanksgiving day and on or before Christmas, use the holiday "xmas"
+		# Fixed date: Dec 25th
+		ret = datetime.datetime(search_year, 12, 25, now.hour, now.minute)
+		
+	elif holiday == "halloween":
+		# Fixed date: Oct 31st
+		ret = datetime.datetime(search_year, 10, 31, now.hour, now.minute)
+
+	elif holiday == "memorialday":
+		# Memorial Day is the last Monday in May
+		# Start at May 31st and subtract the weekday to get back to the previous Monday
+		may_31 = datetime.datetime(search_year, 5, 31)
+		dw = may_31.weekday() # Monday is 0, Sunday is 6
+		day = 31 - dw
+		ret = datetime.datetime(search_year, 5, day, now.hour, now.minute)
+
+	elif holiday == "fathersday":
+		# Father's Day is the 3rd Sunday in June
+		june_first = datetime.datetime(search_year, 6, 1)
+		# First Sunday
+		first_sunday_day = 1 + (6 - june_first.weekday() + 7) % 7
+		# Add 14 days to get from the 1st Sunday to the 3rd
+		day = first_sunday_day + 14
+		ret = datetime.datetime(search_year, 6, day, now.hour, now.minute)
+
+	elif holiday == "easter":
+		# Using the Anonymous Gregorian algorithm to calculate Easter Sunday
+		# Optimized for Python 2.7 integer division
+		a = search_year % 19
+		b = search_year // 100
+		c = search_year % 100
+		d = b // 4
+		e = b % 4
+		f = (b + 8) // 25
+		g = (b - f + 1) // 3
+		h = (19 * a + b - d - g + 15) % 30
+		i = c // 4
+		k = c % 100 % 4
+		l = (32 + 2 * e + 2 * i - h - k) % 7
+		m = (a + 11 * h + 22 * l) // 451
+		month = (h + l - 7 * m + 114) // 31
+		day = ((h + l - 7 * m + 114) % 31) + 1
+		ret = datetime.datetime(search_year, month, day, now.hour, now.minute)
+
+	elif holiday == "newyearsday":
+		# Fixed date: Jan 1st
+		ret = datetime.datetime(search_year, 1, 1, now.hour, now.minute)
+
+	elif holiday == "mlkday":
+		# MLK Day is the 3rd Monday in January
+		jan_first = datetime.datetime(search_year, 1, 1)
+		first_monday_day = 1 + (0 - jan_first.weekday() + 7) % 7
+		day = first_monday_day + 14
+		ret = datetime.datetime(search_year, 1, day, now.hour, now.minute)
+
+	elif holiday == "valentinesday":
+		# Fixed date: Feb 14th
+		ret = datetime.datetime(search_year, 2, 14, now.hour, now.minute)
+
+	elif holiday == "presidentsday":
+		# Presidents Day is the 3rd Monday in February
+		feb_first = datetime.datetime(search_year, 2, 1)
+		first_monday_day = 1 + (0 - feb_first.weekday() + 7) % 7
+		day = first_monday_day + 14
+		ret = datetime.datetime(search_year, 2, day, now.hour, now.minute)
+
+	elif holiday == "stpatricksday":
+		# Fixed date: March 17th
+		ret = datetime.datetime(search_year, 3, 17, now.hour, now.minute)
+
+	elif holiday == "aprilfoolsday":
+		# Fixed date: April 1st
+		ret = datetime.datetime(search_year, 4, 1, now.hour, now.minute)
+
+	elif holiday == "independenceday" or holiday == "4thofjuly":
+		# Fixed date: July 4th
+		ret = datetime.datetime(search_year, 7, 4, now.hour, now.minute)
+
+	elif holiday == "laborday":
+		# Labor Day is the 1st Monday in September
+		sep_first = datetime.datetime(search_year, 9, 1)
+		day = 1 + (0 - sep_first.weekday() + 7) % 7
+		ret = datetime.datetime(search_year, 9, day, now.hour, now.minute)
+
+	elif holiday == "columbusday":
+		# Columbus Day is the 2nd Monday in October
+		oct_first = datetime.datetime(search_year, 10, 1)
+		first_monday_day = 1 + (0 - oct_first.weekday() + 7) % 7
+		day = first_monday_day + 7
+		ret = datetime.datetime(search_year, 10, day, now.hour, now.minute)
+
+	elif holiday == "veteransday":
+		# Fixed date: Nov 11th
+		ret = datetime.datetime(search_year, 11, 11, now.hour, now.minute)
+
+	elif holiday == "christmaseve":
+		# Fixed date: Dec 24th
+		ret = datetime.datetime(search_year, 12, 24, now.hour, now.minute)
+
+	elif holiday == "newyearseve":
+		# Fixed date: Dec 31st
+		ret = datetime.datetime(search_year, 12, 31, now.hour, now.minute)
+
+	return ret
+
 def is_special_time(check):
 	"""
-	Checks if the current date matches a special holiday condition.
-	
-	:param check: A string representing the special holiday condition.
-	:return: True if the current date matches the condition, False otherwise.
+	Checks if the current date is a special holiday or event by 
+	looping through the global holiday array.
+
+	:param check: The string to check against the holiday names.
+	:return: True if the current date matches the holiday criteria, False otherwise.
 	"""
+	global HOLIDAY_NAMES, now
+	check_lower = check.lower().strip()
 
-
-	if check[:4].lower() == 'xmas':
-		if is_number(check[4:].strip()):
-			num = int(check[4:])
-		else:
-			return True if IsThanksgiving(8) or IsXmas(-25) else False
-		return True if IsXmas(num) else False
-
-	if check[:9].lower() == 'christmas':
-		if is_number(check[9:].strip()):
-			num = int(check[9:])
-		else:
-			return True if IsThanksgiving(8) or IsXmas(-25) else False
-		return True if IsXmas(num) else False
-
-	if check[:12].lower() == 'thanksgiving':
+	for holiday in HOLIDAY_NAMES:
+		# We check if the input starts with the holiday name
+		if check_lower.startswith(holiday):
+			
+			# Extract potential numeric offset (the part after the holiday name)
+			remaining_part = check_lower[len(holiday):].strip()
+			printd("Checking if today is:", holiday, "remaining part:", remaining_part)
 			num = 0
-			if is_number(check[12:].strip()):
-					num = int(check[12:])
-			return True if IsThanksgiving(num) else False
+			if is_number(remaining_part):
+				num = int(remaining_part)
 
-	if check[:6].lower() == 'easter':
-		num = 0
-		if is_number(check[6:].strip()):
-			num = int(check[6:])
-		return True if IsEaster(num) else False
+			# Call your date calculation function
+			# Assuming get_holiday_datetime returns a valid datetime object or equivalent
+			holiday_date = get_holiday_datetime(holiday)
+			if holiday_date == -1:
+				printd("Holiday not recognized:", holiday)
+				continue
 
-	if check[:11].lower() == 'mothers day':
-		num = 0
-		if is_number(check[11:].strip()):
-			num = int(check[11:])
-		return True if IsMothersDay(num) else False
+			if holiday == "xmas":
+				return True
+			printd("Checking special time for:", check, "Holiday:", holiday, "Holiday Date:", holiday_date, "Current Date:", datetime.date(now.year, now.month, now.day), "Range (days):", num)
+			is_within_range = is_date_within_range(datetime.date(now.year, now.month, now.day), holiday_date.date(), num)
+			
+			return True if is_within_range else False
 
 	return False
 
@@ -341,7 +484,13 @@ def getDayOfWeek(d):
 	return calendar.day_name[d].lower()
 		
 def getMonth(m):
-	return ['invalid', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'][m % 12]
+	"""
+	Returns the month name for a given month number.
+
+	:param m: The month number (1-12).
+	:return: The name of the month.
+	"""
+	return ['invalid (check the code)','january','february','march','april','may','june','july','august','september','october','november','december'][m % 12 or 12]
 
 # below is the ReferenceDecoder class used to decode the settings file and resolve $ref references within the settings file,
 # allowing for more dynamic and reusable settings structures. It also keeps track of all objects it has decoded in a list 
@@ -742,6 +891,116 @@ def repeatedly_reset():
 	global repeatedly_tracked_plays
 	repeatedly_tracked_plays = {}
 
+def _matches_conditions(item, channel, allow_chance, now_dt, month, now_h, now_m, ddm, now_y, day_of_week, is_except=False):
+	global current_video_tag
+	global LAST_PROGRAMMING_SCHEDULE
+
+	matched_any = False
+
+	# Channel check
+	if 'channel' in item:
+		if item['channel'] is None and channel is None:
+			matched_any = True
+		elif item['channel'] in wildcard_array():
+			matched_any = True
+		elif item['channel'] != channel:
+			return False
+		else:
+			matched_any = True
+
+	# Minimum repeat check (not checked inside 'except')
+	if not is_except and item.get('minimum-before-repeat') is not None:
+		min_repeat = item.get("minimum-before-repeat")
+		if (
+			(is_number(min_repeat)) or
+			(isinstance(min_repeat, list) and len(min_repeat) == 2 and is_number(min_repeat[0]) and is_number(min_repeat[1]))
+		) and not repeatedly_can_play(item):
+			return False
+		matched_any = True
+
+	# Special time check
+	if item.get('special') is not None:
+		if not is_special_time(item['special']):
+			return False
+		matched_any = True
+
+	# Chance check
+	if 'chance' in item:
+		if not is_except:
+			LAST_PROGRAMMING_SCHEDULE = item
+		chance_eval = eval_equation(item['chance'], now_dt)
+		chance_rnd = random.random()
+		printd("Chance Eval", chance_eval, "rnd", chance_rnd, "allow_chance", allow_chance, "uneval", item['chance'])
+		if chance_rnd > float(chance_eval) or not allow_chance:
+			return False
+		matched_any = True
+
+	# Between check
+	if item.get('between') is not None:
+		if is_dict(item['between']):
+			if not is_within_range(item['between']):
+				return False
+			matched_any = True
+		else:
+			report_error("CHECK_TIMES", ["between is not a dictionary", str(item['between'])])
+			if is_except:
+				return False
+
+	# Month check
+	if item.get('month') is not None:
+		if not any(m == month or m in wildcard_array() for m in item['month']):
+			return False
+		matched_any = True
+
+	# Date check
+	if item.get('date') is not None:
+		if not any(d == ddm or d in wildcard_array() for d in item['date']):
+			return False
+		matched_any = True
+
+	# Day of week check
+	if item.get('dayOfWeek') is not None:
+		if not any(d.lower() == day_of_week or d in wildcard_array() for d in item['dayOfWeek']):
+			return False
+		matched_any = True
+
+	# Tag check
+	if 'tag' in item:
+		if current_video_tag is None or item['tag'].lower() != current_video_tag.lower():
+			return False
+		matched_any = True
+
+	# Time range check
+	if ('start' in item) != ('end' in item):
+		report_error("CHECK_TIMES", ["start and end must both be present", str(item)])
+		return False
+
+	if 'start' in item and 'end' in item:
+		ntime = now_dt
+		start_h, start_m = item['start']
+		end_h, end_m = item['end']
+
+		if start_h in wildcard_array(): start_h = now_h
+		if start_m in wildcard_array(): start_m = now_m
+		if end_h in wildcard_array(): end_h = now_h
+		if end_m in wildcard_array(): end_m = now_m
+
+		stime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:00".format(ddm, month, now_y, start_h, start_m)
+		etime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:59".format(ddm, month, now_y, end_h, end_m)
+
+		stime = datetime.datetime.strptime(stime_str, "%d/%m/%Y %H:%M:%S")
+		etime = datetime.datetime.strptime(etime_str, "%d/%m/%Y %H:%M:%S")
+
+		if 'name' in item:
+			printd(item['name'], str(stime), now_dt, ntime, etime)
+
+		if not (stime <= ntime <= etime):
+			return False
+		matched_any = True
+
+	return matched_any if is_except else True
+
+
 def check_video_times(obj, channel=None, allow_chance=True):
 	"""
 	Checks the current time against a list of programming times and returns the first matching schedule.
@@ -754,7 +1013,6 @@ def check_video_times(obj, channel=None, allow_chance=True):
 	try:
 		update_current_time()
 		global now
-		global current_video_tag
 
 		month, now_h, now_m = now.month, now.hour, now.minute
 		now_d, ddm, now_y = now.weekday(), now.day, now.year
@@ -769,86 +1027,28 @@ def check_video_times(obj, channel=None, allow_chance=True):
 
 			video_type = time_item.get('type') or "video"
 
-		 # Channel check
-			if 'channel' in time_item:
-				if time_item['channel'] is None and channel is None:
-					pass
-				elif time_item['channel'] in wildcard_array():
-					pass
-				elif time_item['channel'] != channel:
-					continue
-
-			# Minimum repeat check
-			if time_item.get('minimum-before-repeat') is not None:
-				min_repeat = time_item.get("minimum-before-repeat")
-				if (
-					(is_number(min_repeat)) or
-					(isinstance(min_repeat, list) and len(min_repeat) == 2 and is_number(min_repeat[0]) and is_number(min_repeat[1]))
-				) and not repeatedly_can_play(time_item):
-					continue
-
-			# Special time check
-			if time_item.get('special') is not None:
-				if not is_special_time(time_item['special']):
-					continue
-
-			# Chance check
-			if 'chance' in time_item:
-				chance_eval = eval_equation(time_item['chance'], now)
-				chance_rnd = random.random()
-				printd("Chance Eval", chance_eval, "rnd", chance_rnd, "allow_chance", allow_chance, "uneval", time_item['chance'])
-				if chance_rnd > float(chance_eval) or not allow_chance:
-					continue
-
-			# Between check
-			if time_item.get('between') is not None:
-				if is_dict(time_item['between']):
-					if not is_within_range(time_item['between']):
+			# Except check
+			if time_item.get('except') is not None:
+				if isinstance(time_item['except'], list):
+					if any(
+						is_dict(ex_item) and len(ex_item) > 0 and _matches_conditions(
+							ex_item, channel, allow_chance, now,
+							month, now_h, now_m, ddm, now_y, day_of_week,
+							is_except=True
+						)
+						for ex_item in time_item['except']
+					):
 						continue
 				else:
-					report_error("CHECK_TIMES", ["between is not a dictionary", str(time_item['between'])])
+					report_error("CHECK_TIMES", ["except is not a list", str(time_item['except'])])
 
-			# Month check
-			if time_item.get('month') is not None:
-				if not any(m == month or m in wildcard_array() for m in time_item['month']):
-					continue
-
-			# Date check
-			if time_item.get('date') is not None:
-				if not any(d == ddm or d in wildcard_array() for d in time_item['date']):
-					continue
-
-			# Day of week check
-			if time_item.get('dayOfWeek') is not None:
-				if not any(d.lower() == day_of_week or d in wildcard_array() for d in time_item['dayOfWeek']):
-					continue
-
-			# Tag check
-			if 'tag' in time_item:
-				if current_video_tag is None or time_item['tag'].lower() != current_video_tag.lower():
-					continue
-
-			# Time range check
-			if 'start' in time_item and 'end' in time_item:
-				ntime = now
-				start_h, start_m = time_item['start']
-				end_h, end_m = time_item['end']
-
-				if start_h in wildcard_array(): start_h = now_h
-				if start_m in wildcard_array(): start_m = now_m
-				if end_h in wildcard_array(): end_h = now_h
-				if end_m in wildcard_array(): end_m = now_m
-
-				stime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:00".format(ddm, month, now_y, start_h, start_m)
-				etime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:59".format(ddm, month, now_y, end_h, end_m)
-
-				stime = datetime.datetime.strptime(stime_str, "%d/%m/%Y %H:%M:%S")
-				etime = datetime.datetime.strptime(etime_str, "%d/%m/%Y %H:%M:%S")
-
-				printd(time_item['name'], str(stime), now, ntime, etime)
-
-				if not (stime <= ntime <= etime):
-					continue
+			# Schedule condition checks
+			if not _matches_conditions(
+				time_item, channel, allow_chance, now,
+				month, now_h, now_m, ddm, now_y, day_of_week,
+				is_except=False
+			):
+				continue
 
 			# Static flag
 			if time_item.get('static') is not None:
@@ -968,7 +1168,7 @@ current_video_tag = None
 LAST_PROGRAMMING_SCHEDULE = None
 
 ############################ settings
-SETTINGS_VERSION = 0.996
+SETTINGS_VERSION = 0.997
 
 if base_directory != "":
 	base_directory = base_directory + "/" if base_directory[-1] != "/" else base_directory

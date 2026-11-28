@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# version: 102.33
+# version: 102.34
 # version date: 2026.11
 #
 #	Moving from single large releases to constant updates.
@@ -7,10 +7,23 @@
 #	Update auto commercial insert logic to allow for a real-world media transition overhead.
 #		Linear playlist now generated allowing for more accurate playback (and possible future resume/join-in-progress support).
 #	Fixed bug in get_video_tag function where it would return only a single word in a multi-word tag. Also fixed it to only search the basename of the file so that '@' in parent directory names doesn't cause false positives.
+#	Fixed bug in holiday detection, specifically for 'xmas'
+#	Increased minimum time from 0.1s to 0.666s to avoid too short timeouts when calculating commercial fill breaks.
+#	Add "except" rule to allow for schedule blocks to be skipped.
 #
-# settings version: 0.997
+# settings version: 0.998
 #
 #	Added "commercials_delay_modifier" setting to allow for a real-world delay multiplier for media transition overhead (default is 0.5s).
+#	Added "except" field for times and commercials scheduling blocks.
+# 			A list of dictionaries containing standard times based rules ("between", "chance", "special", etc.)
+#
+#		Example that will execute the schedule block unless it is Thanksgiving:
+#		{
+#			"name": ["path/to/normal/content"],
+#			"except":[
+#							{ "special": "thanksgiving" },
+#					 ]
+#		}
 
 
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
@@ -59,15 +72,15 @@ if sys.version_info[0] >= 3:
 
 # Constants
 
-SCRIPT_VERSION		= 102.33 # current version of the script
-SETTINGS_VERSION	= 0.997 # the version of the "settings" this script supports
+SCRIPT_VERSION		= 102.34 # current version of the script
+SETTINGS_VERSION	= 0.998 # the version of the "settings" this script supports
 
 GET_VIDEOS_FROM_DIR_MIN_DURATION = 0 	 	# default minimum duration of a video in seconds when returning videos from a directory
 GET_VIDEOS_FROM_DIR_MAX_DURATION = 99999 	# default maximum duration of a video in seconds when returning videos from a directory
 VIDEO_EXTENSIONS = ('mp4', 'avi', 'webm', 'mpeg', 'm4v', 'mkv', 'mov', 'flv', 'wmv')	# video file extensions that are considered valid video files
 
 # List of recognized holiday names for special programming or scheduling
-HOLIDAY_NAMES = [ "thanksgiving", "xmas", "halloween", "mothers day", "fathers day", "memorial day", "easter", "new years day", "mlk day", "valentines day", "presidents day", "st patricks day", "april fools day", "independence day", "4th of july", "labor day", "columbus day", "veterans day", "christmas eve", "new years eve" ]
+HOLIDAY_NAMES = [ "thanksgiving", "xmas", "halloween", "mothers day", "fathers day", "memorial day", "easter", "new years day", "mlk day", "valentines day", "presidents day", "st patricks day", "april fools day", "independence day", "4th of july", "labor day", "columbus day", "veterans day", "christmas eve", "christmas", "new years eve" ]
 
 # /Constants
 
@@ -1556,6 +1569,115 @@ def repeatedly_export_schedules_if_debug():
 		except Exception as e:
 			printd("Failed to export schedules: " + str(e))
 
+def _matches_conditions(item, channel, allow_chance, now_dt, month, now_h, now_m, ddm, now_y, day_of_week, is_except=False):
+	global current_video_tag
+	global LAST_PROGRAMMING_SCHEDULE
+
+	matched_any = False
+
+	# Channel check
+	if 'channel' in item:
+		if item['channel'] is None and channel is None:
+			matched_any = True
+		elif item['channel'] in wildcard_array():
+			matched_any = True
+		elif item['channel'] != channel:
+			return False
+		else:
+			matched_any = True
+
+	# Minimum repeat check (not checked inside 'except')
+	if not is_except and item.get('minimum-before-repeat') is not None:
+		min_repeat = item.get("minimum-before-repeat")
+		if (
+			(is_number(min_repeat)) or
+			(isinstance(min_repeat, list) and len(min_repeat) == 2 and is_number(min_repeat[0]) and is_number(min_repeat[1]))
+		) and not repeatedly_can_play(item):
+			return False
+		matched_any = True
+
+	# Special time check
+	if item.get('special') is not None:
+		if not is_special_time(item['special']):
+			return False
+		matched_any = True
+
+	# Chance check
+	if 'chance' in item:
+		if not is_except:
+			LAST_PROGRAMMING_SCHEDULE = item
+		chance_eval = eval_equation(item['chance'])
+		chance_rnd = random.random()
+		printd("Chance Eval", chance_eval, "rnd", chance_rnd, "allow_chance", allow_chance, "uneval", item['chance'])
+		if chance_rnd > float(chance_eval) or not allow_chance:
+			return False
+		matched_any = True
+
+	# Between check
+	if item.get('between') is not None:
+		if is_dict(item['between']):
+			if not is_within_range(item['between']):
+				return False
+			matched_any = True
+		else:
+			report_error("CHECK_TIMES", ["between is not a dictionary", str(item['between'])])
+			if is_except:
+				return False
+
+	# Month check
+	if item.get('month') is not None:
+		if not any(m == month or m in wildcard_array() for m in item['month']):
+			return False
+		matched_any = True
+
+	# Date check
+	if item.get('date') is not None:
+		if not any(d == ddm or d in wildcard_array() for d in item['date']):
+			return False
+		matched_any = True
+
+	# Day of week check
+	if item.get('dayOfWeek') is not None:
+		if not any(d.lower() == day_of_week or d in wildcard_array() for d in item['dayOfWeek']):
+			return False
+		matched_any = True
+
+	# Tag check
+	if 'tag' in item:
+		if current_video_tag is None or item['tag'].lower() != current_video_tag.lower():
+			return False
+		matched_any = True
+
+	# Time range check
+	if ('start' in item) != ('end' in item):
+		report_error("CHECK_TIMES", ["start and end must both be present", str(item)])
+		return False
+
+	if 'start' in item and 'end' in item:
+		ntime = now_dt
+		start_h, start_m = item['start']
+		end_h, end_m = item['end']
+
+		if start_h in wildcard_array(): start_h = now_h
+		if start_m in wildcard_array(): start_m = now_m
+		if end_h in wildcard_array(): end_h = now_h
+		if end_m in wildcard_array(): end_m = now_m
+
+		stime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:00".format(ddm, month, now_y, start_h, start_m)
+		etime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:59".format(ddm, month, now_y, end_h, end_m)
+
+		stime = datetime.datetime.strptime(stime_str, "%d/%m/%Y %H:%M:%S")
+		etime = datetime.datetime.strptime(etime_str, "%d/%m/%Y %H:%M:%S")
+
+		if 'name' in item:
+			printd(item['name'], str(stime), now_dt, ntime, etime)
+
+		if not (stime <= ntime <= etime):
+			return False
+		matched_any = True
+
+	return matched_any if is_except else True
+
 def check_video_times(obj, channel=None, allow_chance=True):
 	"""
 	Checks the current time against a list of programming times and returns the first matching schedule.
@@ -1568,8 +1690,6 @@ def check_video_times(obj, channel=None, allow_chance=True):
 	try:
 		update_current_time()
 		global now
-		global current_video_tag
-		global LAST_PROGRAMMING_SCHEDULE
 
 		month, now_h, now_m = now.month, now.hour, now.minute
 		now_d, ddm, now_y = now.weekday(), now.day, now.year
@@ -1584,87 +1704,28 @@ def check_video_times(obj, channel=None, allow_chance=True):
 
 			video_type = time_item.get('type') or "video"
 
-		 # Channel check
-			if 'channel' in time_item:
-				if time_item['channel'] is None and channel is None:
-					pass
-				elif time_item['channel'] in wildcard_array():
-					pass
-				elif time_item['channel'] != channel:
-					continue
-
-			# Minimum repeat check
-			if time_item.get('minimum-before-repeat') is not None:
-				min_repeat = time_item.get("minimum-before-repeat")
-				if (
-					(is_number(min_repeat)) or
-					(isinstance(min_repeat, list) and len(min_repeat) == 2 and is_number(min_repeat[0]) and is_number(min_repeat[1]))
-				) and not repeatedly_can_play(time_item):
-					continue
-
-			# Special time check
-			if time_item.get('special') is not None:
-				if not is_special_time(time_item['special']):
-					continue
-
-			# Chance check
-			if 'chance' in time_item:
-				LAST_PROGRAMMING_SCHEDULE = time_item
-				chance_eval = eval_equation(time_item['chance'])
-				chance_rnd = random.random()
-				printd("Chance Eval", chance_eval, "rnd", chance_rnd, "allow_chance", allow_chance, "uneval", time_item['chance'])
-				if chance_rnd > float(chance_eval) or not allow_chance:
-					continue
-
-			# Between check
-			if time_item.get('between') is not None:
-				if is_dict(time_item['between']):
-					if not is_within_range(time_item['between']):
+			# Except check
+			if time_item.get('except') is not None:
+				if isinstance(time_item['except'], list):
+					if any(
+						is_dict(ex_item) and len(ex_item) > 0 and _matches_conditions(
+							ex_item, channel, allow_chance, now,
+							month, now_h, now_m, ddm, now_y, day_of_week,
+							is_except=True
+						)
+						for ex_item in time_item['except']
+					):
 						continue
 				else:
-					report_error("CHECK_TIMES", ["between is not a dictionary", str(time_item['between'])])
+					report_error("CHECK_TIMES", ["except is not a list", str(time_item['except'])])
 
-			# Month check
-			if time_item.get('month') is not None:
-				if not any(m == month or m in wildcard_array() for m in time_item['month']):
-					continue
-
-			# Date check
-			if time_item.get('date') is not None:
-				if not any(d == ddm or d in wildcard_array() for d in time_item['date']):
-					continue
-
-			# Day of week check
-			if time_item.get('dayOfWeek') is not None:
-				if not any(d.lower() == day_of_week or d in wildcard_array() for d in time_item['dayOfWeek']):
-					continue
-
-			# Tag check
-			if 'tag' in time_item:
-				if current_video_tag is None or time_item['tag'].lower() != current_video_tag.lower():
-					continue
-
-			# Time range check
-			if 'start' in time_item and 'end' in time_item:
-				ntime = now
-				start_h, start_m = time_item['start']
-				end_h, end_m = time_item['end']
-
-				if start_h in wildcard_array(): start_h = now_h
-				if start_m in wildcard_array(): start_m = now_m
-				if end_h in wildcard_array(): end_h = now_h
-				if end_m in wildcard_array(): end_m = now_m
-
-				stime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:00".format(ddm, month, now_y, start_h, start_m)
-				etime_str = "{:02d}/{:02d}/{:04d} {:02d}:{:02d}:59".format(ddm, month, now_y, end_h, end_m)
-
-				stime = datetime.datetime.strptime(stime_str, "%d/%m/%Y %H:%M:%S")
-				etime = datetime.datetime.strptime(etime_str, "%d/%m/%Y %H:%M:%S")
-
-				printd(time_item['name'], str(stime), now, ntime, etime)
-
-				if not (stime <= ntime <= etime):
-					continue
+			# Schedule condition checks
+			if not _matches_conditions(
+				time_item, channel, allow_chance, now,
+				month, now_h, now_m, ddm, now_y, day_of_week,
+				is_except=False
+			):
+				continue
 
 			# Static flag
 			if time_item.get('static') is not None:
@@ -1708,7 +1769,7 @@ def generate_commercials_list(total_time_seconds, multiplier=50, max_remaining_t
 	# Enforce absolute floor: no broadcast commercial exists under 5 seconds
 	floor = max(max_remaining_time, 10)
 
-	max_time_before_timeout = max(((float(total_time_seconds) / 100) / 100) * multiplier, .1)
+	max_time_before_timeout = max(((float(total_time_seconds) / 100) / 100) * multiplier, .666)  # 0.666 seconds minimum to avoid too short timeouts
 	gen_start_time = time.time()
 
 	selected_intervals = list(prefilled_list) if prefilled_list else []
@@ -2381,6 +2442,9 @@ def is_special_time(check):
 			if holiday_date == -1:
 				printd("Holiday not recognized:", holiday)
 				continue
+
+			if holiday == "xmas":
+				return True
 			printd("Checking special time for:", check, "Holiday:", holiday, "Holiday Date:", holiday_date, "Current Date:", datetime.date(now.year, now.month, now.day), "Range (days):", num)
 			is_within_range = is_date_within_range(datetime.date(now.year, now.month, now.day), holiday_date.date(), num)
 			
@@ -2584,11 +2648,11 @@ def update_settings():
 	if 'version' in settings:
 		if is_number(settings['version']):
 			if float(settings['version']) != SETTINGS_VERSION:
-				report_error("Settings", ["Settings version mismatch. Things might not work so well.", "A"])
+				report_error("Settings", ["Settings version mismatch. Things might not work so well."])
 		else:
-			report_error("Settings", ["Settings version mismatch. Things might not work so well.", "B"])
+			report_error("Settings", ["Settings version mismatch. Things might not work so well."])
 	else:
-		report_error("Settings", ["Settings version mismatch. Things might not work so well.", "C"])
+		report_error("Settings", ["Settings version mismatch. Things might not work so well."])
 
 
 def validate_json(json_str):
@@ -3496,7 +3560,7 @@ while True:
 			update_settings() # Refresh settings
 			refresh_plugins() # Refresh plugins
 			repeatedly_reset() # Reset "repeatedly" tracked times
-			report_error("SETTINGS", ["Settings Updated"]) #
+			report_error("SETTINGS", ["Settings Updated", "Plugins Refreshed", "Minimum Before Repeats Reset"]) #
 			printd("Settings reloaded due to file change")
 
 		# Default commercial break count
