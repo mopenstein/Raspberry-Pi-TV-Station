@@ -150,6 +150,9 @@
         $results_html .= $block;
     }
 
+    // Start sidebar open on mobile only if no test results are displayed yet
+    $initial_sidebar_class = empty($results_html) ? 'open' : '';
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -176,12 +179,14 @@
             margin: 0;
             display: flex;
             height: 100vh;
+            height: 100dvh;
             overflow: hidden;
         }
 
         /* Sidebar Navigation */
         aside {
             width: 320px;
+            flex-shrink: 0;
             background: var(--card-bg);
             border-right: 1px solid var(--border);
             padding: 1.25rem;
@@ -189,9 +194,35 @@
             flex-direction: column;
             gap: 0.75rem;
             overflow-y: auto;
+            box-sizing: border-box;
+            z-index: 1000;
+            transition: transform 0.25s ease-in-out;
         }
 
-        h1 { font-size: 1.1rem; margin: 0 0 0.5rem 0; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; }
+        .sidebar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar-header h1 {
+            font-size: 1.1rem;
+            margin: 0;
+            color: var(--accent);
+        }
+
+        .close-sidebar-btn {
+            display: none;
+            width: auto;
+            margin: 0;
+            padding: 0.35rem 0.65rem;
+            background: #334155;
+            color: var(--text);
+            font-size: 0.9rem;
+        }
         
         label { display: block; font-size: 0.75rem; margin-bottom: 0.2rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.025em; }
         
@@ -204,7 +235,7 @@
             color: white;
             margin-bottom: 0.25rem;
             box-sizing: border-box;
-            font-size: 0.9rem;
+            font-size: 16px;
         }
 
         button {
@@ -222,12 +253,44 @@
 
         button:hover { opacity: 0.9; }
 
+        /* Mobile Toggle Button & Backdrop */
+        .mobile-toggle-btn {
+            display: none;
+            position: fixed;
+            bottom: 1.25rem;
+            right: 1.25rem;
+            width: auto;
+            margin: 0;
+            padding: 0.75rem 1.15rem;
+            border-radius: 9999px;
+            background: var(--accent);
+            color: #000;
+            font-size: 0.95rem;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+            z-index: 900;
+        }
+
+        .sidebar-backdrop {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 950;
+            backdrop-filter: blur(2px);
+        }
+
+        .sidebar-backdrop.active {
+            display: block;
+        }
+
         /* Main Content Area */
         main {
             flex: 1;
             padding: 2rem;
             overflow-y: auto;
             background: #0b0f19;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .run-card {
@@ -244,6 +307,8 @@
             font-size: 1.1rem;
             margin-bottom: 1rem;
             display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
             justify-content: space-between;
             align-items: center;
         }
@@ -255,6 +320,7 @@
             padding: 0.3rem 0.6rem;
             border-radius: 4px;
             color: #22c55e;
+            word-break: break-all;
         }
 
         .section-title {
@@ -268,7 +334,7 @@
         }
 
         .msg-list { background: #0f172a; border-radius: 8px; padding: 1rem; }
-        .msg-item { border-bottom: 1px solid #334155; padding: 0.5rem 0; }
+        .msg-item { border-bottom: 1px solid #334155; padding: 0.5rem 0; word-break: break-word; }
         .msg-item:last-child { border-bottom: none; }
         
         .type-tag {
@@ -283,7 +349,7 @@
 
         .grid-json {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
             gap: 10px;
         }
 
@@ -294,20 +360,61 @@
             font-family: monospace;
             font-size: 0.85rem;
             white-space: pre-wrap;
+            word-break: break-word;
             border-left: 3px solid var(--success);
         }
 
         .json-entry.commercial { border-left-color: var(--commercial); }
 
-        .error-box { background: #7f1d1d; color: #fecaca; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        .error-box { background: #7f1d1d; color: #fecaca; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; overflow-x: auto; }
 
-        .eqn-block { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+        .eqn-block { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); padding-bottom: 1.5rem; }
+
+        /* Mobile Breakpoint */
+        @media (max-width: 768px) {
+            aside {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                width: 85vw;
+                max-width: 320px;
+                transform: translateX(-100%);
+                box-shadow: 4px 0 15px rgba(0, 0, 0, 0.5);
+            }
+
+            aside.open {
+                transform: translateX(0);
+            }
+
+            .close-sidebar-btn {
+                display: inline-block;
+            }
+
+            .mobile-toggle-btn {
+                display: block;
+            }
+
+            main {
+                padding: 1rem;
+                padding-bottom: 5rem;
+            }
+
+            .run-card {
+                padding: 1rem;
+            }
+        }
     </style>
 </head>
 <body>
 
-    <aside>
-        <h1>Test Input</h1>
+    <div id="backdrop" class="sidebar-backdrop <?php echo $initial_sidebar_class ? 'active' : ''; ?>" onclick="toggleSidebar(false)"></div>
+
+    <aside id="sidebar" class="<?php echo $initial_sidebar_class; ?>">
+        <div class="sidebar-header">
+            <h1>Test Input</h1>
+            <button type="button" class="close-sidebar-btn" onclick="toggleSidebar(false)" aria-label="Close Sidebar">✕ Hide</button>
+        </div>
         
         <label for="date">Select a Date</label>
         <input type="date" id="date" value="<?php echo $current_date; ?>" />
@@ -327,14 +434,16 @@
         <label for="run">Number of Runs</label>
         <input type="number" id="run" value="<?php echo $runMax; ?>" min="1" max="10" />
 
-        <button onclick="formatDateTime()">Run System Test</button>
+        <button type="button" onclick="formatDateTime()">Run System Test</button>
 
         <div class="eqn-block">
             <label for="equation">Eval Equation (Chance)</label>
             <input type="text" id="equation" placeholder="e.g. 0.5" value="<?php echo $current_eqn; ?>" />
-            <button style="background: #64748b; color: white;" onclick="evaluateEquation()">Run Equation</button>
+            <button type="button" style="background: #64748b; color: white;" onclick="evaluateEquation()">Run Equation</button>
         </div>
     </aside>
+
+    <button type="button" class="mobile-toggle-btn" onclick="toggleSidebar(true)">☰ Test Settings</button>
 
     <main>
         <?php 
@@ -349,6 +458,20 @@
     </main>
 
     <script>
+        function toggleSidebar(forceState) {
+            const sidebar = document.getElementById('sidebar');
+            const backdrop = document.getElementById('backdrop');
+            const shouldOpen = typeof forceState === 'boolean' ? forceState : !sidebar.classList.contains('open');
+
+            if (shouldOpen) {
+                sidebar.classList.add('open');
+                backdrop.classList.add('active');
+            } else {
+                sidebar.classList.remove('open');
+                backdrop.classList.remove('active');
+            }
+        }
+
         function evaluateEquation() {
             const equationInput = document.getElementById('equation').value;
             if(equationInput) {
