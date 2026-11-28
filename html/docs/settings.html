@@ -261,7 +261,7 @@
     <hr>
 
     <h2>3. Programming Rules (<code>times</code> Array)</h2>
-    <p>Evaluated <strong>bottom-to-top</strong>. The first rule matching all criteria executes.</p>
+    <p>Evaluated <strong>bottom-to-top</strong>. The first rule matching all criteria (and not matching any <code>except</code> rule) executes.</p>
 
     <table>
         <thead>
@@ -318,7 +318,7 @@
             <tr>
                 <td><code>start</code> / <code>end</code></td>
                 <td><code>[HH, MM]</code></td>
-                <td>Alternate 24-hour time range format (e.g., <code>[20, 0]</code> to <code>[22, 30]</code>). Accepts wildcard strings (<code>"*"</code>).</td>
+                <td>Alternate 24-hour time range format (e.g., <code>[20, 0]</code> to <code>[22, 30]</code>). Both <code>start</code> and <code>end</code> must be specified together; if only one is present, an error is logged and the check evaluates as a non-match. Accepts wildcard strings (<code>"*"</code>).</td>
             </tr>
             <tr>
                 <td><code>dayOfWeek</code></td>
@@ -344,6 +344,18 @@
                 <td><code>chance</code></td>
                 <td><code>&lt;string&gt; | &lt;float&gt;</code></td>
                 <td>Mathematical probability expression evaluated between <code>0.0</code> and <code>1.0</code>, or percentage (e.g., <code>"25%"</code>).</td>
+            </tr>
+			<tr>
+                <td><code>except</code></td>
+                <td><code>[&lt;object&gt;]</code></td>
+                <td>
+                    Array of exclusion condition objects evaluated using the exact same matching logic as standard schedule conditions (<code>special</code>, <code>between</code>, <code>dayOfWeek</code>, <code>month</code>, <code>date</code>, <code>tag</code>, <code>channel</code>, <code>start</code>/<code>end</code>, and <code>chance</code>; <code>minimum-before-repeat</code> is excluded and logs an error if present).
+                    <ul>
+                        <li><strong>Evaluation (OR logic):</strong> Evaluated prior to main schedule checks. If <em>any</em> non-empty rule object in the list matches, the entire schedule block is skipped and evaluation falls through to earlier rules.</li>
+                        <li><strong>Paired Time Bounds:</strong> Any time-window exclusion must include both <code>start</code> and <code>end</code> in the same object (e.g., <code>{"start": [20, 0], "end": [23, 0]}</code>); if one is missing, an error is logged and that exclusion object is treated as a non-match.</li>
+                        <li><strong>Inverted Chance:</strong> When <code>chance</code> is used inside an <code>except</code> entry (e.g., <code>{"chance": "0.10"}</code>), a successful probability roll skips the schedule block.</li>
+                    </ul>
+                </td>
             </tr>
             <tr>
                 <td><code>minimum-before-repeat</code></td>
@@ -436,7 +448,7 @@
                 <td>Probability expression required to activate this ad pool.</td>
             </tr>
             <tr>
-                <td><code>between</code>, <code>special</code>, <code>month</code>, <code>min-length</code>, <code>max-length</code></td>
+                <td><code>between</code>, <code>special</code>, <code>month</code>, <code>min-length</code>, <code>max-length</code>, <code>except</code></td>
                 <td>-</td>
                 <td>Behaves identically to criteria in the <code>times</code> array.</td>
             </tr>
